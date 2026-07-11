@@ -11,7 +11,7 @@ struct SyntheticChannelView: View {
         if state.isWeatherTuned {
             WeatherSceneView(compact: compact, scale: scale)
         } else if state.isDashboardTuned {
-            DashboardSceneView(compact: compact)
+            DashboardSceneView(compact: compact, url: state.tunedDashboardURL)
         } else if state.isPhotosTuned {
             PhotoSceneView(compact: compact)
         } else if state.isCamerasTuned {
@@ -52,6 +52,7 @@ struct WeatherOverlayBadge: View {
 struct DashboardSceneView: View {
     @EnvironmentObject var state: AppState
     var compact = false
+    var url: URL?
 
     @State private var image: UIImage?
     @State private var status = "CONNECTING TO DASHBOARD..."
@@ -96,11 +97,17 @@ struct DashboardSceneView: View {
                 }
             }
         }
-        .task { await run() }
+        // Keyed on the URL so zapping between dashboard channels restarts
+        // the fetch loop against the right snapshot (and drops the old frame).
+        .task(id: url) {
+            image = nil
+            consecutiveFailures = 0
+            await run()
+        }
     }
 
     private func run() async {
-        guard let baseURL = state.dashImageURL else {
+        guard let baseURL = url else {
             status = "SET THE DASHBOARD SNAPSHOT URL IN SETTINGS"
             return
         }

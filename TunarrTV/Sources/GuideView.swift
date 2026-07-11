@@ -315,7 +315,7 @@ struct ChannelLogoView: View {
                 Image(systemName: "cloud.sun.fill")
                     .font(.system(size: size * 0.55))
                     .foregroundColor(.yellow)
-            } else if channel.id == HADashboardChannel.id {
+            } else if channel.id.hasPrefix(HADashboardChannel.id) {
                 Image(systemName: "house.fill")
                     .font(.system(size: size * 0.55))
                     .foregroundColor(Color(red: 0.45, green: 0.85, blue: 0.75))

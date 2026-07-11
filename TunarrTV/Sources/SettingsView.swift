@@ -24,8 +24,13 @@ struct SettingsView: View {
     @State private var locating = false
     @State private var locationStatus: String?
 
+    @State private var showAllSections = false
+
+    /// First-run keeps the form to just the Tunarr URL — unless the user
+    /// already runs standalone (built-in channels, no Tunarr).
     private var isFirstRun: Bool {
         state.serverURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !state.hasStandaloneConfig
     }
 
     var body: some View {
@@ -48,6 +53,17 @@ struct SettingsView: View {
                         .frame(maxWidth: 900)
                         .multilineTextAlignment(.center)
                     #endif
+                    if !showAllSections {
+                        Button("NO TUNARR? USE JUST THE BUILT-IN CHANNELS") {
+                            showAllSections = true
+                        }
+                        .font(Theme.mono(19 * uiScale))
+                        Text("Weather, Home Assistant dashboards, security cameras, and an Immich photo slideshow all work without a Tunarr server.")
+                            .font(.system(size: 17 * uiScale))
+                            .foregroundColor(Theme.dimText)
+                            .frame(maxWidth: 900)
+                            .multilineTextAlignment(.center)
+                    }
                 }
 
                 field("TUNARR SERVER URL", placeholder: "http://192.168.1.100:8000", text: $urlText)
@@ -58,7 +74,7 @@ struct SettingsView: View {
                         .foregroundColor(testResult.hasPrefix("OK") ? Theme.onAir : Theme.accent)
                 }
 
-                if !isFirstRun {
+                if !isFirstRun || showAllSections {
                     sectionHeader("WEATHER CHANNEL — \(WeatherChannel.number)", tint: Theme.cellWeather)
                     field("LOCATION (ZIP, CITY, OR LAT,LON) — USED WITHOUT HOME ASSISTANT",
                           placeholder: "90210  /  Austin, TX  /  37.77, -122.42", text: $locationText)
@@ -129,9 +145,10 @@ struct SettingsView: View {
                     }
 
                     sectionHeader("HOME DASHBOARD CHANNEL — \(HADashboardChannel.number) (OPTIONAL)", tint: Theme.cellDashboard)
-                    field("SNAPSHOT URL FROM THE HA-SCREENCAP COMPANION",
-                          placeholder: "http://192.168.1.100:8090/latest.png", text: $dashURLText)
-                    Text("Shows your Home Assistant dashboard as channel \(HADashboardChannel.number). Needs the ha-screencap container running on your network — see the GitHub README.")
+                    field("SNAPSHOT URLS (COMMA-SEPARATED, OPTIONAL NAME=URL)",
+                          placeholder: "http://192.168.1.100:8090/latest.png, Kitchen=http://…/latest/1.png",
+                          text: $dashURLText)
+                    Text("Each URL becomes its own channel — the first is \(HADashboardChannel.number), extras count down from 996. Name them like \"Kitchen=http://…\". Snapshots come from the ha-screencap companion (Home Assistant add-on or Docker container — see the GitHub README).")
                         .font(.system(size: 17 * uiScale))
                         .foregroundColor(Theme.dimText)
                         .frame(maxWidth: 1000, alignment: .leading)

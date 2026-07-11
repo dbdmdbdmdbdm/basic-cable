@@ -10,14 +10,14 @@ final class AppState: ObservableObject {
     static let fetchHours = 12
 
     static let weatherChannelId = WeatherChannel.id
-    static let dashboardChannelId = HADashboardChannel.id
     static let photosChannelId = PhotosChannel.id
     static let camerasChannelId = CamerasChannel.id
 
-    /// Client-rendered channels — no Tunarr stream behind them.
+    /// Client-rendered channels — no Tunarr stream behind them. Dashboard
+    /// channels match by prefix ("hadash-local", "hadash-local-1", …).
     static func isSyntheticChannel(_ id: String) -> Bool {
-        id == weatherChannelId || id == dashboardChannelId || id == photosChannelId
-            || id == camerasChannelId
+        id == weatherChannelId || id == photosChannelId || id == camerasChannelId
+            || id.hasPrefix(HADashboardChannel.id)
     }
 
     @Published var serverURLString: String {
@@ -112,8 +112,18 @@ final class AppState: ObservableObject {
         !serverURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && client != nil
     }
 
+    /// The app works without Tunarr: any configured synthetic channel (or a
+    /// weather location) is enough to run on the built-in lineup alone.
+    var hasStandaloneConfig: Bool {
+        !manualLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || haClient != nil
+            || immichClient != nil
+            || !dashboards.isEmpty
+            || !cameraEntityIds.isEmpty
+    }
+
     var isWeatherTuned: Bool { tunedChannel?.id == Self.weatherChannelId }
-    var isDashboardTuned: Bool { tunedChannel?.id == Self.dashboardChannelId }
+    var isDashboardTuned: Bool { tunedChannel?.id.hasPrefix(HADashboardChannel.id) == true }
     var isPhotosTuned: Bool { tunedChannel?.id == Self.photosChannelId }
     var isCamerasTuned: Bool { tunedChannel?.id == Self.camerasChannelId }
     var isSyntheticTuned: Bool {
@@ -138,11 +148,51 @@ final class AppState: ObservableObject {
 
     var immichClient: ImmichClient? { ImmichClient(urlString: immichURLString, apiKey: immichAPIKey) }
 
-    /// The ha-screencap snapshot URL, when the dashboard channel is set up.
-    var dashImageURL: URL? {
-        let trimmed = dashImageURLString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, let url = URL(string: trimmed), url.scheme != nil else { return nil }
-        return url
+    struct DashboardConfig: Equatable {
+        let name: String
+        let url: URL
+    }
+
+    /// Dashboard channels parsed from the settings field: comma-separated
+    /// snapshot URLs, each optionally prefixed "NAME=" ("Kitchen=http://…").
+    /// The first keeps channel 998; extras count down from 996 (997 is
+    /// photos). Capped at 8 so the numbering never collides with cameras.
+    var dashboards: [DashboardConfig] { Self.parseDashboards(dashImageURLString) }
+
+    static func parseDashboards(_ text: String) -> [DashboardConfig] {
+        var configs: [DashboardConfig] = []
+        for entry in text.split(separator: ",") {
+            let trimmed = entry.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { continue }
+            var name = ""
+            var urlText = trimmed
+            // "NAME=URL" — but never split inside a bare URL's query string.
+            if let eq = trimmed.firstIndex(of: "="), !trimmed[..<eq].contains("://") {
+                name = String(trimmed[..<eq]).trimmingCharacters(in: .whitespaces)
+                urlText = String(trimmed[trimmed.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
+            }
+            guard let url = URL(string: urlText), url.scheme != nil else { continue }
+            configs.append(DashboardConfig(name: name, url: url))
+            if configs.count == 8 { break }
+        }
+        return configs
+    }
+
+    static func dashboardChannelId(index: Int) -> String {
+        index == 0 ? HADashboardChannel.id : "\(HADashboardChannel.id)-\(index)"
+    }
+
+    static func dashboardChannelNumber(index: Int) -> Int {
+        index == 0 ? HADashboardChannel.number : 996 - (index - 1)
+    }
+
+    /// The snapshot URL for the tuned dashboard channel, if one is tuned.
+    var tunedDashboardURL: URL? {
+        guard let id = tunedChannel?.id, id.hasPrefix(HADashboardChannel.id) else { return nil }
+        let configs = dashboards
+        guard !configs.isEmpty else { return nil }
+        let index = Int(id.dropFirst(HADashboardChannel.id.count + 1)) ?? 0
+        return configs.indices.contains(index) ? configs[index].url : configs[0].url
     }
 
     init() {
@@ -298,7 +348,7 @@ final class AppState: ObservableObject {
     // MARK: - Lifecycle
 
     func bootstrap() async {
-        if !isConfigured {
+        if !isConfigured, !hasStandaloneConfig {
             // Screenshot/UI-test hook: launch straight into the demo lineup.
             // Optional: --tune <number> picks the channel, --fullscreen
             // skips the guide.
@@ -335,38 +385,45 @@ final class AppState: ObservableObject {
             reloadDemoGuide()
             return
         }
-        guard let client else {
+        guard client != nil || hasStandaloneConfig else {
             loadError = "Set your Tunarr server URL in SETTINGS"
             return
         }
-        do {
-            var channels = try await client.fetchChannels()
-            let from = earliestWindowStart
-            let to = from.addingTimeInterval(TimeInterval(Self.fetchHours * 3600))
-            var guide = try await client.fetchGuide(from: from, to: to)
+        let from = earliestWindowStart
+        let to = from.addingTimeInterval(TimeInterval(Self.fetchHours * 3600))
+        var channels: [Channel] = []
+        var guide: [String: [GuideEntry]] = [:]
 
-            // Synthetic channels, rendered client-side (Tunarr knows nothing about them).
-            for (channel, entries) in syntheticChannels(from: from, to: to) {
-                channels.append(channel)
-                guide[channel.id] = entries
+        // Tunarr is optional — with no server the lineup is just the
+        // client-rendered channels (weather, dashboards, photos, cameras).
+        if let client {
+            do {
+                channels = try await client.fetchChannels()
+                guide = try await client.fetchGuide(from: from, to: to)
+            } catch {
+                loadError = "Can't reach Tunarr at \(serverURLString)"
+                isFullscreen = false
+                return
             }
+        }
 
-            self.channels = channels
-            self.guide = guide
-            self.guideFetchedThrough = to
-            self.loadError = nil
-            if windowStart < earliestWindowStart {
-                windowStart = earliestWindowStart
+        for (channel, entries) in syntheticChannels(from: from, to: to) {
+            channels.append(channel)
+            guide[channel.id] = entries
+        }
+
+        self.channels = channels
+        self.guide = guide
+        self.guideFetchedThrough = to
+        self.loadError = nil
+        if windowStart < earliestWindowStart {
+            windowStart = earliestWindowStart
+        }
+        if tunedChannel == nil {
+            let lastId = UserDefaults.standard.string(forKey: "lastChannelId")
+            if let target = channels.first(where: { $0.id == lastId }) ?? channels.first {
+                tune(target)
             }
-            if tunedChannel == nil {
-                let lastId = UserDefaults.standard.string(forKey: "lastChannelId")
-                if let target = channels.first(where: { $0.id == lastId }) ?? channels.first {
-                    tune(target)
-                }
-            }
-        } catch {
-            loadError = "Can't reach Tunarr at \(serverURLString)"
-            isFullscreen = false
         }
     }
 
@@ -500,12 +557,16 @@ final class AppState: ObservableObject {
                 summary: "A rotating slideshow of your Immich favorite photos."
             )]))
         }
-        if dashImageURL != nil {
-            let channel = Channel(id: Self.dashboardChannelId, name: "Home",
-                                  number: HADashboardChannel.number, icon: nil, groupTitle: nil)
+        for (index, dashboard) in dashboards.enumerated() {
+            let name = dashboard.name.isEmpty
+                ? (index == 0 ? "Home" : "Home \(index + 1)")
+                : dashboard.name
+            let channel = Channel(id: Self.dashboardChannelId(index: index), name: name,
+                                  number: Self.dashboardChannelNumber(index: index),
+                                  icon: nil, groupTitle: nil)
             lineup.append((channel, [Self.allDayEntry(
-                id: "hadash-full", channelId: channel.id, from: from, to: to,
-                kind: .haDashboard, title: "HOME DASHBOARD",
+                id: "hadash-full-\(index)", channelId: channel.id, from: from, to: to,
+                kind: .haDashboard, title: "\(name.uppercased()) DASHBOARD",
                 summary: "Your Home Assistant dashboard, live from the ha-screencap companion."
             )]))
         }
@@ -515,6 +576,9 @@ final class AppState: ObservableObject {
             kind: .weather, title: "LOCAL FORECAST",
             summary: "Current conditions, extended forecast, and around-the-house readings."
         )]))
+        // Extra dashboards count down from 996, so sort to keep the guide
+        // in channel-number order.
+        lineup.sort { $0.0.number < $1.0.number }
         return lineup
     }
 
@@ -837,21 +901,36 @@ final class AppState: ObservableObject {
         return .init(message: message, preview: preview)
     }
 
+    /// Tests every configured dashboard URL; the preview is the first
+    /// snapshot that loads.
     func testDashboard(urlString: String) async -> IntegrationTestResult {
-        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, let url = URL(string: trimmed), url.scheme != nil else {
-            return .init(message: "FAILED — ENTER THE SNAPSHOT URL FIRST")
+        let configs = Self.parseDashboards(urlString)
+        guard !configs.isEmpty else {
+            return .init(message: "FAILED — ENTER A SNAPSHOT URL FIRST")
         }
-        var request = URLRequest(url: url)
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.timeoutInterval = 10
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
-              (response as? HTTPURLResponse)?.statusCode == 200,
-              let image = UIImage(data: data) else {
+        var preview: UIImage?
+        var failedNames: [String] = []
+        for (index, config) in configs.enumerated() {
+            var request = URLRequest(url: config.url)
+            request.cachePolicy = .reloadIgnoringLocalCacheData
+            request.timeoutInterval = 10
+            if let (data, response) = try? await URLSession.shared.data(for: request),
+               (response as? HTTPURLResponse)?.statusCode == 200,
+               let image = UIImage(data: data) {
+                if preview == nil { preview = image }
+            } else {
+                failedNames.append(config.name.isEmpty ? "#\(index + 1)" : config.name.uppercased())
+            }
+        }
+        if failedNames.isEmpty {
+            return .init(message: "OK — \(configs.count) DASHBOARD\(configs.count == 1 ? "" : "S")",
+                         preview: preview)
+        }
+        if preview == nil {
             return .init(message: "FAILED — NO IMAGE AT THAT URL")
         }
-        let size = "\(Int(image.size.width * image.scale))×\(Int(image.size.height * image.scale))"
-        return .init(message: "OK — SNAPSHOT \(size)", preview: image)
+        return .init(message: "FAILED — NO IMAGE FOR: \(failedNames.joined(separator: ", "))",
+                     preview: preview)
     }
 
     func testImmich(urlString: String, apiKey: String) async -> IntegrationTestResult {
