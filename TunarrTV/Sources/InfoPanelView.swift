@@ -121,11 +121,8 @@ struct ControlClusterView: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            controlButton("CH UP", systemImage: "chevron.up") { state.channelUp() }
-            controlButton("CH DN", systemImage: "chevron.down") { state.channelDown() }
-            controlButton("FULL SCRN", systemImage: "arrow.up.left.and.arrow.down.right") {
-                state.isFullscreen = true
-            }
+            // Channel zapping lives on the remote in fullscreen; the mini
+            // player is the fullscreen affordance. Settings is all that's left.
             controlButton("SETTINGS", systemImage: "gearshape") { state.showSettings = true }
         }
     }

@@ -43,22 +43,15 @@ struct ContentView: View {
         } else {
             VStack(spacing: 26) {
                 HStack(alignment: .top, spacing: 36) {
-                    ZStack {
-                        if state.isWeatherTuned {
-                            WeatherSceneView(compact: true)
-                        } else {
-                            PlayerLayerView(player: state.player)
-                            if state.isBuffering, let channel = state.tunedChannel {
-                                TuningIndicator(channel: channel)
-                            }
-                        }
+                    // Focusable so up-navigation from the channel column has
+                    // somewhere to land; select goes fullscreen.
+                    Button {
+                        if state.tunedChannel != nil { state.isFullscreen = true }
+                    } label: {
+                        MiniPlayerPreview()
                     }
+                    .buttonStyle(RetroCellButtonStyle())
                     .frame(width: 660, height: 371)
-                    .background(Color.black)
-                    .overlay(
-                        Rectangle()
-                            .stroke(Color(white: 0.25), lineWidth: 2)
-                    )
                     InfoPanelView()
                         .frame(height: 371)
                 }
@@ -118,6 +111,46 @@ struct ContentView: View {
     }
     #endif
 }
+
+#if os(tvOS)
+/// The guide screen's live preview box. Focus shows the standard white
+/// ring plus a fullscreen glyph so it reads as "select to go fullscreen".
+struct MiniPlayerPreview: View {
+    @EnvironmentObject var state: AppState
+    @Environment(\.isFocused) private var isFocused
+
+    var body: some View {
+        ZStack {
+            if state.isWeatherTuned {
+                WeatherSceneView(compact: true)
+            } else {
+                PlayerLayerView(player: state.player)
+                if state.isBuffering, let channel = state.tunedChannel {
+                    TuningIndicator(channel: channel)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black)
+        .overlay(alignment: .bottomTrailing) {
+            if isFocused {
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(12)
+                    .background(Color.black.opacity(0.7))
+                    .cornerRadius(8)
+                    .padding(14)
+            }
+        }
+        .overlay(
+            Rectangle()
+                .stroke(isFocused ? Color.white : Color(white: 0.25),
+                        lineWidth: isFocused ? 4 : 2)
+        )
+    }
+}
+#endif
 
 /// Yellow tag pinned top-right whenever demo mode is active, so sample
 /// content is never mistaken for a live lineup.
