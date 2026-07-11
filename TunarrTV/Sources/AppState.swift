@@ -157,17 +157,115 @@ final class AppState: ObservableObject {
             .filter { !$0.isEmpty }
     }
 
-    /// The cameras actually shown in the grid (configured minus hidden).
+    /// The cameras actually shown in the grid (configured minus hidden),
+    /// in list order — the add-on config's order wins when present.
     var visibleCameraIds: [String] {
-        cameraEntityIds.filter { !hiddenCameraIds.contains($0) }
+        effectiveCameraIds.filter { !hiddenCameraIds.contains($0) }
     }
 
     var mediaPlayerIds: [String] { Self.parseEntityList(mediaPlayerEntities) }
 
+    // MARK: - Remote config (served by the ha-screencap add-on)
+
+    /// Optional app config served by the ha-screencap add-on at /appconfig.
+    /// When present, its lists override the on-device settings, so cameras,
+    /// weather sensors, media players, and the ticker are all managed from
+    /// Home Assistant.
+    struct RemoteAppConfig: Decodable, Equatable {
+        struct TickerEntity: Decodable, Equatable {
+            let entity: String
+            let name: String?
+            let show_when: String?
+            let color: String?
+            let icon: String?
+            let display: String?
+        }
+        struct Ticker: Decodable, Equatable {
+            let scroll: Bool?
+            let entities: [TickerEntity]?
+        }
+        let cameras: [String]?
+        let weather_sensors: [String]?
+        let media_players: [String]?
+        let ticker: Ticker?
+    }
+
+    @Published private(set) var remoteConfig: RemoteAppConfig?
+
+    /// Probes each configured dashboard origin for /appconfig — the add-on
+    /// that serves the snapshots also serves the app config.
+    func refreshRemoteConfig() async {
+        var origins: [URL] = []
+        for dashboard in dashboards {
+            guard var components = URLComponents(url: dashboard.url, resolvingAgainstBaseURL: false) else { continue }
+            components.path = "/appconfig"
+            components.query = nil
+            if let url = components.url, !origins.contains(url) { origins.append(url) }
+        }
+        for url in origins {
+            var request = URLRequest(url: url)
+            request.cachePolicy = .reloadIgnoringLocalCacheData
+            request.timeoutInterval = 5
+            if let (data, response) = try? await URLSession.shared.data(for: request),
+               (response as? HTTPURLResponse)?.statusCode == 200,
+               let config = try? JSONDecoder().decode(RemoteAppConfig.self, from: data) {
+                if config != remoteConfig { remoteConfig = config }
+                return
+            }
+        }
+        if remoteConfig != nil { remoteConfig = nil }
+    }
+
+    /// Non-empty remote lists win over the on-device fields.
+    private static func override(_ remote: [String]?, _ local: [String]) -> [String] {
+        guard let remote, !remote.isEmpty else { return local }
+        return remote
+    }
+
+    var effectiveCameraIds: [String] { Self.override(remoteConfig?.cameras, cameraEntityIds) }
+    var effectiveWeatherSensorIds: [String] {
+        Self.override(remoteConfig?.weather_sensors, Self.parseEntityList(haSensorEntities))
+    }
+    var effectiveMediaPlayerIds: [String] { Self.override(remoteConfig?.media_players, mediaPlayerIds) }
+    var tickerScroll: Bool { remoteConfig?.ticker?.scroll ?? false }
+    var tickerEntityConfigs: [RemoteAppConfig.TickerEntity] { remoteConfig?.ticker?.entities ?? [] }
+
     /// Now-playing across the configured media players, deduped.
     func fetchNowPlaying() async -> [HAClient.NowPlayingItem] {
-        guard let ha = haClient, !mediaPlayerIds.isEmpty else { return [] }
-        return await ha.fetchNowPlaying(mediaPlayerIds)
+        guard let ha = haClient, !effectiveMediaPlayerIds.isEmpty else { return [] }
+        return await ha.fetchNowPlaying(effectiveMediaPlayerIds)
+    }
+
+    /// Extra ticker items from the add-on config: live entity states,
+    /// optionally conditional (show_when), styled with a color and icon.
+    struct TickerChip: Identifiable, Equatable {
+        let id: String
+        let text: String
+        let icon: String
+        let colorName: String?
+    }
+
+    func fetchTickerChips() async -> [TickerChip] {
+        let configs = tickerEntityConfigs
+        guard let ha = haClient, !configs.isEmpty else { return [] }
+        var chips: [TickerChip] = []
+        for config in configs {
+            guard let state = await ha.fetchDisplayState(config.entity) else { continue }
+            if let condition = config.show_when, !condition.isEmpty,
+               state.state.lowercased() != condition.lowercased() { continue }
+            let name = (config.name ?? state.name).uppercased()
+            let value = state.state.replacingOccurrences(of: "_", with: " ").uppercased()
+            let text: String
+            switch config.display {
+            case "name": text = name
+            case "state": text = value
+            default: text = "\(name) \(value)"
+            }
+            chips.append(TickerChip(id: config.entity, text: text,
+                                    icon: config.icon ?? "circle.fill",
+                                    colorName: config.color))
+        }
+        return chips
     }
 
     var immichClient: ImmichClient? { ImmichClient(urlString: immichURLString, apiKey: immichAPIKey) }
@@ -433,6 +531,8 @@ final class AppState: ObservableObject {
             reloadDemoGuide()
             return
         }
+        // The add-on's app config (if any) shapes the lineup — fetch first.
+        await refreshRemoteConfig()
         guard client != nil || hasStandaloneConfig else {
             loadError = "Set your Tunarr server URL in SETTINGS"
             return
@@ -587,7 +687,7 @@ final class AppState: ObservableObject {
     /// configured in settings. Each is one continuous all-day guide block.
     private func syntheticChannels(from: Date, to: Date) -> [(Channel, [GuideEntry])] {
         var lineup: [(Channel, [GuideEntry])] = []
-        if haClient != nil, !cameraEntityIds.isEmpty {
+        if haClient != nil, !effectiveCameraIds.isEmpty {
             let channel = Channel(id: Self.camerasChannelId, name: "Security",
                                   number: CamerasChannel.number, icon: nil, groupTitle: nil)
             lineup.append((channel, [Self.allDayEntry(
@@ -655,11 +755,7 @@ final class AppState: ObservableObject {
             if let location = try? await ha.fetchLocation() {
                 (latitude, longitude) = location
             }
-            let entityIds = haSensorEntities
-                .split(separator: ",")
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }
-            sensors = await ha.fetchSensors(entityIds)
+            sensors = await ha.fetchSensors(effectiveWeatherSensorIds)
         }
 
         // Fallback when HA isn't configured: the location field accepts

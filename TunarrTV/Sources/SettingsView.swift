@@ -172,6 +172,7 @@ struct SettingsView: View {
                   placeholder: "eyJhbGciOi...", text: $haTokenText)
             field("HA SENSOR ENTITIES (COMMA-SEPARATED)",
                   placeholder: "sensor.outdoor_temp, sensor.pool_temp", text: $haSensorsText)
+            managedByAddonNote
             suggestionControl("sensors", suggestions: sensorSuggestions, listText: $haSensorsText,
                               buttonTitle: "SUGGEST SENSORS") {
                 await state.suggestWeatherSensors(urlString: haURLText, token: haTokenText)
@@ -187,7 +188,8 @@ struct SettingsView: View {
         section("SECURITY CAMERAS CHANNEL — \(CamerasChannel.number) (OPTIONAL)", tint: Theme.cellCameras) {
             field("HA CAMERA ENTITIES (COMMA-SEPARATED)",
                   placeholder: "camera.front_door, camera.backyard", text: $haCamerasText)
-            caption("Shows all cameras live in one grid as channel \(CamerasChannel.number). Uses the Home Assistant URL and token above — streams come straight from HA, full motion.")
+            managedByAddonNote
+            caption("Shows all cameras live in one grid as channel \(CamerasChannel.number) (list order = grid order). Uses the Home Assistant URL and token above — streams come straight from HA, full motion.")
             suggestionControl("cameras", suggestions: cameraSuggestions, listText: $haCamerasText,
                               buttonTitle: "SUGGEST CAMERAS") {
                 await state.suggestCameras(urlString: haURLText, token: haTokenText)
@@ -248,6 +250,7 @@ struct SettingsView: View {
         section("NOW PLAYING TICKER (OPTIONAL)", tint: Color(white: 0.55)) {
             field("HA MEDIA PLAYER ENTITIES (COMMA-SEPARATED)",
                   placeholder: "media_player.living_room, media_player.kitchen", text: $mediaPlayersText)
+            managedByAddonNote
             caption("A news-style black bar along the bottom of every channel: what's playing on these media players on the left (speakers playing the same thing collapse to one), weather and clock on the right. Turn it on while watching — hold SELECT on the remote (or press LEFT/RIGHT); the ticker button on iPhone. It stays on while you zap, until you turn it off the same way.")
             suggestionControl("mediaplayers", suggestions: mediaPlayerSuggestions, listText: $mediaPlayersText,
                               buttonTitle: "SUGGEST MEDIA PLAYERS") {
@@ -553,6 +556,17 @@ struct SettingsView: View {
         Task {
             await state.reload()
             await state.refreshWeather(force: true)
+        }
+    }
+
+    /// Shown wherever the add-on's app config takes precedence.
+    @ViewBuilder
+    private var managedByAddonNote: some View {
+        if state.remoteConfig != nil {
+            Text("✓ MANAGED BY THE SCREENCAP ADD-ON — its app config overrides this list.")
+                .font(Theme.mono(16 * uiScale, weight: .medium))
+                .foregroundColor(Theme.onAir)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 

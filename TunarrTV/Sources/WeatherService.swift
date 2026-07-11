@@ -272,6 +272,22 @@ struct HAClient {
         return groups.map { NowPlayingItem(title: $0.title, artist: $0.artist, players: $0.players) }
     }
 
+    /// One entity's state + friendly name, skipping dead entities.
+    func fetchDisplayState(_ entityId: String) async -> (name: String, state: String)? {
+        struct EntityState: Decodable {
+            let state: String
+            let attributes: Attributes
+            struct Attributes: Decodable {
+                let friendly_name: String?
+            }
+        }
+        guard let (data, response) = try? await URLSession.shared.data(for: request(path: "api/states/\(entityId)")),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let entity = try? JSONDecoder().decode(EntityState.self, from: data),
+              !["unavailable", "unknown"].contains(entity.state) else { return nil }
+        return (entity.attributes.friendly_name ?? entityId, entity.state)
+    }
+
     func entityExists(_ entityId: String) async -> Bool {
         guard let (_, response) = try? await URLSession.shared.data(for: request(path: "api/states/\(entityId)")) else {
             return false
