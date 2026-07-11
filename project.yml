@@ -1,0 +1,58 @@
+name: TunarrTV
+options:
+  bundleIdPrefix: com.dbdm
+  deploymentTarget:
+    tvOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    TARGETED_DEVICE_FAMILY: "3"
+targets:
+  TunarrTV:
+    type: application
+    platform: tvOS
+    sources:
+      - TunarrTV/Sources
+      - TunarrTV/Assets.xcassets
+    info:
+      path: TunarrTV/Info.plist
+      properties:
+        CFBundleDisplayName: Basic Cable
+        UIUserInterfaceStyle: Dark
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        NSLocalNetworkUsageDescription: Connects to your Tunarr server on the local network to stream channels.
+        NSLocationWhenInUseUsageDescription: Used to show your local forecast on the weather channel.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dbdm.tunarrtv
+        INFOPLIST_KEY_UIUserInterfaceStyle: Dark
+        ASSETCATALOG_COMPILER_APPICON_NAME: App Icon & Top Shelf Image
+  TunarrTViOS:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - TunarrTV/Sources
+      - TunarrTV/AssetsiOS.xcassets
+    info:
+      path: TunarrTV/Info-iOS.plist
+      properties:
+        CFBundleDisplayName: Basic Cable
+        UIUserInterfaceStyle: Dark
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        NSLocalNetworkUsageDescription: Connects to your Tunarr server on the local network to stream channels.
+        NSLocationWhenInUseUsageDescription: Used to show your local forecast on the weather channel.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dbdm.tunarrtv
+        INFOPLIST_KEY_UIUserInterfaceStyle: Dark
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"
