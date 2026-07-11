@@ -24,6 +24,12 @@ channel field, comma-separated, optionally named:
 http://<ha-host>:8090/latest.png, Kitchen=http://<ha-host>:8090/latest/1.png
 ```
 
+> **Upgrading from 1.2.x**: the entity lists (dashboard paths/names,
+> cameras, weather sensors, media players) changed from YAML lists to
+> comma-separated text. If the add-on reports "invalid options" after
+> updating, open Configuration and re-save those fields as
+> comma-separated values.
+
 ## Options
 
 | Option | Meaning |
