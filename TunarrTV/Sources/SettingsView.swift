@@ -19,6 +19,8 @@ struct SettingsView: View {
     @State private var immichKeyText = ""
     @State private var testResult: String?
     @State private var testing = false
+    @State private var integrationResults: [String: AppState.IntegrationTestResult] = [:]
+    @State private var integrationTesting: Set<String> = []
     @State private var locating = false
     @State private var locationStatus: String?
 
@@ -89,6 +91,10 @@ struct SettingsView: View {
                           placeholder: "eyJhbGciOi...", text: $haTokenText)
                     field("HA SENSOR ENTITIES (COMMA-SEPARATED)",
                           placeholder: "sensor.outdoor_temp, sensor.pool_temp", text: $haSensorsText)
+                    testControl("ha") {
+                        await state.testHomeAssistant(urlString: haURLText, token: haTokenText,
+                                                      sensorEntities: haSensorsText)
+                    }
 
                     sectionHeader("SECURITY CAMERAS CHANNEL (OPTIONAL)")
                     field("HA CAMERA ENTITIES (COMMA-SEPARATED)",
@@ -97,6 +103,10 @@ struct SettingsView: View {
                         .font(.system(size: 17 * uiScale))
                         .foregroundColor(Theme.dimText)
                         .frame(maxWidth: 1000, alignment: .leading)
+                    testControl("cameras") {
+                        await state.testCameras(urlString: haURLText, token: haTokenText,
+                                                cameraEntities: haCamerasText)
+                    }
                     if !state.cameraEntityIds.isEmpty {
                         VStack(spacing: 10) {
                             ForEach(state.cameraEntityIds, id: \.self) { entityId in
@@ -120,6 +130,9 @@ struct SettingsView: View {
                         .font(.system(size: 17 * uiScale))
                         .foregroundColor(Theme.dimText)
                         .frame(maxWidth: 1000, alignment: .leading)
+                    testControl("dashboard") {
+                        await state.testDashboard(urlString: dashURLText)
+                    }
 
                     sectionHeader("PHOTOS CHANNEL (OPTIONAL)")
                     field("IMMICH URL",
@@ -130,6 +143,9 @@ struct SettingsView: View {
                         .font(.system(size: 17 * uiScale))
                         .foregroundColor(Theme.dimText)
                         .frame(maxWidth: 1000, alignment: .leading)
+                    testControl("photos") {
+                        await state.testImmich(urlString: immichURLText, apiKey: immichKeyText)
+                    }
 
                     sectionHeader("SYNC")
                     Toggle(isOn: $state.iCloudSyncEnabled) {
@@ -268,6 +284,41 @@ struct SettingsView: View {
             await state.reload()
             await state.refreshWeather(force: true)
         }
+    }
+
+    /// A TEST button + result line + optional preview image for one
+    /// integration section. Tests run against the current field text,
+    /// like the Tunarr TEST button, so nothing needs saving first.
+    private func testControl(_ key: String,
+                             run: @escaping () async -> AppState.IntegrationTestResult) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 16) {
+                Button(integrationTesting.contains(key) ? "TESTING..." : "TEST") {
+                    guard !integrationTesting.contains(key) else { return }
+                    integrationTesting.insert(key)
+                    integrationResults[key] = nil
+                    Task {
+                        integrationResults[key] = await run()
+                        integrationTesting.remove(key)
+                    }
+                }
+                .font(Theme.mono(19 * uiScale))
+                if let result = integrationResults[key] {
+                    Text(result.message)
+                        .font(Theme.mono(17 * uiScale, weight: .medium))
+                        .foregroundColor(result.isSuccess ? Theme.onAir : Theme.accent)
+                        .lineLimit(2)
+                }
+            }
+            if let preview = integrationResults[key]?.preview {
+                Image(uiImage: preview)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxHeight: 200 * uiScale)
+                    .cornerRadius(6)
+            }
+        }
+        .frame(maxWidth: 1000, alignment: .leading)
     }
 
     /// Show/hide state for one camera in the grid. Applied immediately

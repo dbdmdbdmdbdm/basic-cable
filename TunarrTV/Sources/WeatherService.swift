@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 struct WeatherData {
     struct Current {
@@ -171,6 +172,49 @@ struct HAClient {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 5
         return request
+    }
+
+    enum HAError: Error {
+        case unauthorized
+        case unreachable
+    }
+
+    /// One-line identity check for the settings TEST button:
+    /// "HA 2026.7 · HOME". 401/403 → bad token; anything else → unreachable.
+    func fetchConfigSummary() async throws -> String {
+        struct Config: Decodable {
+            let version: String?
+            let location_name: String?
+        }
+        guard let (data, response) = try? await URLSession.shared.data(for: request(path: "api/config")) else {
+            throw HAError.unreachable
+        }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if status == 401 || status == 403 { throw HAError.unauthorized }
+        guard status == 200, let config = try? JSONDecoder().decode(Config.self, from: data) else {
+            throw HAError.unreachable
+        }
+        var summary = "HA \(config.version ?? "?")"
+        if let name = config.location_name, !name.isEmpty {
+            summary += " · \(name.uppercased())"
+        }
+        return summary
+    }
+
+    func entityExists(_ entityId: String) async -> Bool {
+        guard let (_, response) = try? await URLSession.shared.data(for: request(path: "api/states/\(entityId)")) else {
+            return false
+        }
+        return (response as? HTTPURLResponse)?.statusCode == 200
+    }
+
+    /// Still frame via /api/camera_proxy — used as the TEST preview.
+    func fetchCameraStill(_ entityId: String) async -> UIImage? {
+        var request = request(path: "api/camera_proxy/\(entityId)")
+        request.timeoutInterval = 10
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        return UIImage(data: data)
     }
 
     func fetchLocation() async throws -> (latitude: Double, longitude: Double) {

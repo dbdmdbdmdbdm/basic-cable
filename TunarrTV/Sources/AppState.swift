@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import Combine
+import UIKit
 
 @MainActor
 final class AppState: ObservableObject {
@@ -741,6 +742,116 @@ final class AppState: ObservableObject {
             return "OK — TUNARR \(version)"
         } catch {
             return "FAILED — CAN'T REACH SERVER"
+        }
+    }
+
+    // MARK: - Integration tests (settings TEST buttons)
+
+    struct IntegrationTestResult {
+        let message: String
+        var preview: UIImage?
+        var isSuccess: Bool { message.hasPrefix("OK") }
+    }
+
+    private static func parseEntityList(_ text: String) -> [String] {
+        text.split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
+    func testHomeAssistant(urlString: String, token: String, sensorEntities: String) async -> IntegrationTestResult {
+        guard let ha = HAClient(urlString: urlString, token: token) else {
+            return .init(message: "FAILED — ENTER THE URL AND TOKEN FIRST")
+        }
+        do {
+            let summary = try await ha.fetchConfigSummary()
+            let ids = Self.parseEntityList(sensorEntities)
+            guard !ids.isEmpty else { return .init(message: "OK — \(summary)") }
+            let sensors = await ha.fetchSensors(ids)
+            return .init(message: "OK — \(summary) · \(sensors.count)/\(ids.count) SENSORS")
+        } catch HAClient.HAError.unauthorized {
+            return .init(message: "FAILED — TOKEN REJECTED (401)")
+        } catch {
+            return .init(message: "FAILED — CAN'T REACH HOME ASSISTANT")
+        }
+    }
+
+    /// Exercises the exact playback path the channel uses: entity lookup,
+    /// then a websocket camera/stream request and a GET of the returned
+    /// HLS playlist. Preview is a still frame from the first camera.
+    func testCameras(urlString: String, token: String, cameraEntities: String) async -> IntegrationTestResult {
+        guard let ha = HAClient(urlString: urlString, token: token) else {
+            return .init(message: "FAILED — SET THE HOME ASSISTANT URL AND TOKEN ABOVE")
+        }
+        let ids = Self.parseEntityList(cameraEntities)
+        guard !ids.isEmpty else {
+            return .init(message: "FAILED — ADD CAMERA ENTITIES FIRST")
+        }
+        var found: [String] = []
+        var missing: [String] = []
+        for id in ids {
+            if await ha.entityExists(id) { found.append(id) } else { missing.append(id) }
+        }
+        guard let first = found.first else {
+            return .init(message: "FAILED — NO CAMERAS FOUND, CHECK THE ENTITY IDS")
+        }
+
+        var streamOK = false
+        if let url = try? await HACameraStream.fetchStreamURL(
+            haURLString: urlString, token: token, entityId: first) {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 10
+            if let (_, response) = try? await URLSession.shared.data(for: request),
+               (response as? HTTPURLResponse)?.statusCode == 200 {
+                streamOK = true
+            }
+        }
+        guard streamOK else {
+            return .init(message: "FAILED — CAMERA FOUND BUT ITS STREAM DIDN'T START")
+        }
+
+        let preview = await ha.fetchCameraStill(first)
+        var message = "OK — \(found.count)/\(ids.count) CAMERAS · STREAM READY"
+        if let firstMissing = missing.first {
+            message += " · NOT FOUND: \(firstMissing)"
+        }
+        return .init(message: message, preview: preview)
+    }
+
+    func testDashboard(urlString: String) async -> IntegrationTestResult {
+        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let url = URL(string: trimmed), url.scheme != nil else {
+            return .init(message: "FAILED — ENTER THE SNAPSHOT URL FIRST")
+        }
+        var request = URLRequest(url: url)
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.timeoutInterval = 10
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let image = UIImage(data: data) else {
+            return .init(message: "FAILED — NO IMAGE AT THAT URL")
+        }
+        let size = "\(Int(image.size.width * image.scale))×\(Int(image.size.height * image.scale))"
+        return .init(message: "OK — SNAPSHOT \(size)", preview: image)
+    }
+
+    func testImmich(urlString: String, apiKey: String) async -> IntegrationTestResult {
+        guard let client = ImmichClient(urlString: urlString, apiKey: apiKey) else {
+            return .init(message: "FAILED — ENTER THE URL AND API KEY FIRST")
+        }
+        do {
+            let favorites = try await client.fetchFavorites()
+            guard let sample = favorites.randomElement() else {
+                return .init(message: "OK — CONNECTED, BUT NO FAVORITES YET")
+            }
+            var preview: UIImage?
+            if let (data, response) = try? await URLSession.shared.data(for: client.imageRequest(for: sample)),
+               (response as? HTTPURLResponse)?.statusCode == 200 {
+                preview = UIImage(data: data)
+            }
+            return .init(message: "OK — \(favorites.count) FAVORITE PHOTOS", preview: preview)
+        } catch {
+            return .init(message: "FAILED — CHECK THE URL AND API KEY")
         }
     }
 }
