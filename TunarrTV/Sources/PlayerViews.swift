@@ -33,8 +33,8 @@ struct FullscreenPlayerView: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            if state.isWeatherTuned {
-                WeatherSceneView()
+            if state.isSyntheticTuned {
+                SyntheticChannelView()
                     .ignoresSafeArea()
             } else {
                 PlayerLayerView(player: state.player)

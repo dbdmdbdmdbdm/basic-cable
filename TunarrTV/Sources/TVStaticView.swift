@@ -10,18 +10,23 @@ struct TVStaticView: View {
     @State private var flicker = Timer.publish(every: 0.08, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        ZStack {
-            if frames.isEmpty {
-                Color.black
-            } else {
-                frames[frameIndex % frames.count]
-                    .resizable()
-                    .interpolation(.none)
-                    .aspectRatio(contentMode: .fill)
-            }
-            ScanlinesOverlay()
-        }
-        .clipped()
+        // The noise image is an overlay on a proposal-sized base, so its
+        // scaledToFill overflow never inflates this view's layout bounds —
+        // that inflation off-centered the TUNING label on iOS (the ZStack
+        // centered on the oversized static, not the visible frame).
+        Color.black
+            .overlay(
+                Group {
+                    if !frames.isEmpty {
+                        frames[frameIndex % frames.count]
+                            .resizable()
+                            .interpolation(.none)
+                            .aspectRatio(contentMode: .fill)
+                    }
+                }
+            )
+            .overlay(ScanlinesOverlay())
+            .clipped()
         .onAppear {
             if frames.isEmpty {
                 frames = Self.noiseFrames()

@@ -13,6 +13,9 @@ struct SettingsView: View {
     @State private var haURLText = ""
     @State private var haTokenText = ""
     @State private var haSensorsText = ""
+    @State private var dashURLText = ""
+    @State private var immichURLText = ""
+    @State private var immichKeyText = ""
     @State private var testResult: String?
     @State private var testing = false
     @State private var locating = false
@@ -86,6 +89,24 @@ struct SettingsView: View {
                     field("HA SENSOR ENTITIES (COMMA-SEPARATED)",
                           placeholder: "sensor.outdoor_temp, sensor.pool_temp", text: $haSensorsText)
 
+                    sectionHeader("HOME DASHBOARD CHANNEL (OPTIONAL)")
+                    field("SNAPSHOT URL FROM THE HA-SCREENCAP COMPANION",
+                          placeholder: "http://192.168.1.100:8090/latest.png", text: $dashURLText)
+                    Text("Shows your Home Assistant dashboard as channel \(HADashboardChannel.number). Needs the ha-screencap container running on your network — see the GitHub README.")
+                        .font(.system(size: 17 * uiScale))
+                        .foregroundColor(Theme.dimText)
+                        .frame(maxWidth: 1000, alignment: .leading)
+
+                    sectionHeader("PHOTOS CHANNEL (OPTIONAL)")
+                    field("IMMICH URL",
+                          placeholder: "http://192.168.1.100:2283", text: $immichURLText)
+                    field("IMMICH API KEY",
+                          placeholder: "create one in Immich under Account Settings > API Keys", text: $immichKeyText)
+                    Text("Shows a slideshow of your Immich favorites as channel \(PhotosChannel.number).")
+                        .font(.system(size: 17 * uiScale))
+                        .foregroundColor(Theme.dimText)
+                        .frame(maxWidth: 1000, alignment: .leading)
+
                     sectionHeader("SYNC")
                     Toggle(isOn: $state.iCloudSyncEnabled) {
                         Text("SYNC SETTINGS VIA ICLOUD")
@@ -131,6 +152,9 @@ struct SettingsView: View {
             haURLText = state.haURLString
             haTokenText = state.haToken
             haSensorsText = state.haSensorEntities
+            dashURLText = state.dashImageURLString
+            immichURLText = state.immichURLString
+            immichKeyText = state.immichAPIKey
         }
     }
 
@@ -210,6 +234,9 @@ struct SettingsView: View {
         state.haURLString = haURLText.trimmingCharacters(in: .whitespacesAndNewlines)
         state.haToken = haTokenText.trimmingCharacters(in: .whitespacesAndNewlines)
         state.haSensorEntities = haSensorsText.trimmingCharacters(in: .whitespacesAndNewlines)
+        state.dashImageURLString = dashURLText.trimmingCharacters(in: .whitespacesAndNewlines)
+        state.immichURLString = immichURLText.trimmingCharacters(in: .whitespacesAndNewlines)
+        state.immichAPIKey = immichKeyText.trimmingCharacters(in: .whitespacesAndNewlines)
         state.showSettings = false
         Task {
             await state.reload()

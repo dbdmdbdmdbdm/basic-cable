@@ -8,6 +8,8 @@ enum Theme {
     static let channelColumnTuned = Color(red: 0.15, green: 0.28, blue: 0.60)
     static let cellFlex = Color(white: 0.28)
     static let cellWeather = Color(red: 0.55, green: 0.66, blue: 0.85)
+    static let cellDashboard = Color(red: 0.52, green: 0.78, blue: 0.70)
+    static let cellPhotos = Color(red: 0.85, green: 0.68, blue: 0.55)
 
     /// Three quiet shades for program cells. Within a channel row, each
     /// distinct show/movie takes the next shade in the cycle (episodes of

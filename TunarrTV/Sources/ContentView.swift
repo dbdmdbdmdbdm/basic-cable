@@ -79,8 +79,8 @@ struct ContentView: View {
     private var phoneBody: some View {
         VStack(spacing: 10) {
             ZStack {
-                if state.isWeatherTuned {
-                    WeatherSceneView(compact: true, scale: 0.85)
+                if state.isSyntheticTuned {
+                    SyntheticChannelView(compact: true, scale: 0.85)
                 } else {
                     PlayerLayerView(player: state.player)
                     if state.isBuffering, let channel = state.tunedChannel {
@@ -121,8 +121,8 @@ struct MiniPlayerPreview: View {
 
     var body: some View {
         ZStack {
-            if state.isWeatherTuned {
-                WeatherSceneView(compact: true)
+            if state.isSyntheticTuned {
+                SyntheticChannelView(compact: true)
             } else {
                 PlayerLayerView(player: state.player)
                 if state.isBuffering, let channel = state.tunedChannel {

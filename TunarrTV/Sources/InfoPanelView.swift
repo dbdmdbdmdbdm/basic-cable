@@ -14,7 +14,7 @@ struct InfoPanelView: View {
                     .lineLimit(1)
 
                 HStack(spacing: 14) {
-                    Text(entry.kind == .weather
+                    Text(entry.isSynthetic
                         ? "ALL DAY"
                         : "\(Theme.timeFormatter.string(from: entry.start)) - \(Theme.timeFormatter.string(from: entry.stop))")
                         .font(Theme.mono(24, weight: .medium))
@@ -27,7 +27,7 @@ struct InfoPanelView: View {
                     }
                 }
 
-                if entry.kind != .weather, entry.airs(at: state.now) {
+                if !entry.isSynthetic, entry.airs(at: state.now) {
                     progressRow(for: entry)
                 }
 

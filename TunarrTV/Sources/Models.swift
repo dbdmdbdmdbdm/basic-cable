@@ -6,6 +6,20 @@ enum WeatherChannel {
     static let number = 999
 }
 
+/// Synthetic channel showing a Home Assistant dashboard, rendered by the
+/// ha-screencap companion container (tvOS has no web engine, so a box on
+/// the network runs the browser and this channel displays its snapshots).
+enum HADashboardChannel {
+    static let id = "hadash-local"
+    static let number = 998
+}
+
+/// Synthetic channel showing a slideshow of Immich favorite photos.
+enum PhotosChannel {
+    static let id = "photos-local"
+    static let number = 997
+}
+
 struct Channel: Identifiable, Decodable, Hashable {
     let id: String
     let name: String
@@ -49,10 +63,17 @@ struct GuideEntry: Identifiable, Hashable {
         case content
         case flex
         case weather
+        case haDashboard
+        case photos
         case other
     }
 
     var isFlex: Bool { kind == .flex }
+
+    /// Client-rendered channels: always-on, no video stream, no progress bar.
+    var isSynthetic: Bool {
+        kind == .weather || kind == .haDashboard || kind == .photos
+    }
 
     func airs(at date: Date) -> Bool {
         date >= start && date < stop

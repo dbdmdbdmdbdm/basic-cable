@@ -235,6 +235,8 @@ struct GuideCellView: View {
     private var background: Color {
         if isOnAir { return Theme.onAir }
         if entry.kind == .weather { return Theme.cellWeather }
+        if entry.kind == .haDashboard { return Theme.cellDashboard }
+        if entry.kind == .photos { return Theme.cellPhotos }
         if entry.isFlex { return Theme.cellFlex }
         return shade
     }
@@ -312,6 +314,14 @@ struct ChannelLogoView: View {
                 Image(systemName: "cloud.sun.fill")
                     .font(.system(size: size * 0.55))
                     .foregroundColor(.yellow)
+            } else if channel.id == HADashboardChannel.id {
+                Image(systemName: "house.fill")
+                    .font(.system(size: size * 0.55))
+                    .foregroundColor(Color(red: 0.45, green: 0.85, blue: 0.75))
+            } else if channel.id == PhotosChannel.id {
+                Image(systemName: "photo.on.rectangle.angled")
+                    .font(.system(size: size * 0.55))
+                    .foregroundColor(.orange)
             } else if let path = channel.icon?.path, !path.isEmpty, let url = URL(string: path) {
                 AsyncImage(url: url) { image in
                     image.resizable().scaledToFit()

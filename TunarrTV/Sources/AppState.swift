@@ -9,6 +9,13 @@ final class AppState: ObservableObject {
     static let fetchHours = 12
 
     static let weatherChannelId = WeatherChannel.id
+    static let dashboardChannelId = HADashboardChannel.id
+    static let photosChannelId = PhotosChannel.id
+
+    /// Client-rendered channels — no Tunarr stream behind them.
+    static func isSyntheticChannel(_ id: String) -> Bool {
+        id == weatherChannelId || id == dashboardChannelId || id == photosChannelId
+    }
 
     @Published var serverURLString: String {
         didSet { persist(serverURLString, forKey: "serverURL") }
@@ -24,6 +31,15 @@ final class AppState: ObservableObject {
     }
     @Published var haSensorEntities: String {
         didSet { persist(haSensorEntities, forKey: "haSensorEntities") }
+    }
+    @Published var dashImageURLString: String {
+        didSet { persist(dashImageURLString, forKey: "dashImageURL") }
+    }
+    @Published var immichURLString: String {
+        didSet { persist(immichURLString, forKey: "immichURL") }
+    }
+    @Published var immichAPIKey: String {
+        didSet { persist(immichAPIKey, forKey: "immichKey") }
     }
     /// Mirror settings through iCloud key-value storage so configuring the
     /// iPhone app configures the Apple TV app (and vice versa).
@@ -77,8 +93,23 @@ final class AppState: ObservableObject {
     }
 
     var isWeatherTuned: Bool { tunedChannel?.id == Self.weatherChannelId }
+    var isDashboardTuned: Bool { tunedChannel?.id == Self.dashboardChannelId }
+    var isPhotosTuned: Bool { tunedChannel?.id == Self.photosChannelId }
+    var isSyntheticTuned: Bool {
+        guard let id = tunedChannel?.id else { return false }
+        return Self.isSyntheticChannel(id)
+    }
 
     var haClient: HAClient? { HAClient(urlString: haURLString, token: haToken) }
+
+    var immichClient: ImmichClient? { ImmichClient(urlString: immichURLString, apiKey: immichAPIKey) }
+
+    /// The ha-screencap snapshot URL, when the dashboard channel is set up.
+    var dashImageURL: URL? {
+        let trimmed = dashImageURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let url = URL(string: trimmed), url.scheme != nil else { return nil }
+        return url
+    }
 
     init() {
         let defaults = UserDefaults.standard
@@ -99,6 +130,9 @@ final class AppState: ObservableObject {
         haURLString = setting("haURL")
         haToken = setting("haToken")
         haSensorEntities = setting("haSensorEntities")
+        dashImageURLString = setting("dashImageURL")
+        immichURLString = setting("immichURL")
+        immichAPIKey = setting("immichKey")
         windowStart = Self.floorToQuarterHour(Date())
 
         NotificationCenter.default.addObserver(
@@ -140,6 +174,9 @@ final class AppState: ObservableObject {
         persist(haURLString, forKey: "haURL")
         persist(haToken, forKey: "haToken")
         persist(haSensorEntities, forKey: "haSensorEntities")
+        persist(dashImageURLString, forKey: "dashImageURL")
+        persist(immichURLString, forKey: "immichURL")
+        persist(immichAPIKey, forKey: "immichKey")
     }
 
     /// Applies settings changed on another device. Local edits re-persist
@@ -149,6 +186,7 @@ final class AppState: ObservableObject {
         let cloud = NSUbiquitousKeyValueStore.default
         var serverChanged = false
         var weatherChanged = false
+        var lineupChanged = false
         for key in keys {
             let value = cloud.string(forKey: key) ?? ""
             switch key {
@@ -167,12 +205,24 @@ final class AppState: ObservableObject {
             case "haSensorEntities" where value != haSensorEntities:
                 haSensorEntities = value
                 weatherChanged = true
+            case "dashImageURL" where value != dashImageURLString:
+                dashImageURLString = value
+                lineupChanged = true
+            case "immichURL" where value != immichURLString:
+                immichURLString = value
+                lineupChanged = true
+            case "immichKey" where value != immichAPIKey:
+                immichAPIKey = value
+                lineupChanged = true
             default:
                 break
             }
         }
         if serverChanged {
             loadError = nil
+            Task { await reload() }
+        } else if lineupChanged {
+            // Synthetic channels appeared/disappeared — rebuild the guide.
             Task { await reload() }
         }
         if weatherChanged {
@@ -236,10 +286,11 @@ final class AppState: ObservableObject {
             let to = from.addingTimeInterval(TimeInterval(Self.fetchHours * 3600))
             var guide = try await client.fetchGuide(from: from, to: to)
 
-            // Synthetic weather channel, rendered client-side (Tunarr knows nothing about it).
-            let weatherChannel = Self.makeWeatherChannel()
-            channels.append(weatherChannel)
-            guide[weatherChannel.id] = Self.weatherGuideEntries(from: from, to: to)
+            // Synthetic channels, rendered client-side (Tunarr knows nothing about them).
+            for (channel, entries) in syntheticChannels(from: from, to: to) {
+                channels.append(channel)
+                guide[channel.id] = entries
+            }
 
             self.channels = channels
             self.guide = guide
@@ -275,7 +326,7 @@ final class AppState: ObservableObject {
                 }
                 // Watchdog: buffering that never resolves means the stream
                 // died under us (e.g. server reaped the session) — re-tune.
-                if self.isBuffering, !self.isWeatherTuned, self.tunedChannel != nil {
+                if self.isBuffering, !self.isSyntheticTuned, self.tunedChannel != nil {
                     if let since = self.bufferingSince {
                         if Date().timeIntervalSince(since) > 25 {
                             self.bufferingSince = nil
@@ -345,9 +396,10 @@ final class AppState: ObservableObject {
         var channels = DemoContent.asChannels
         var guide = DemoContent.guide(from: from, to: to)
 
-        let weatherChannel = Self.makeWeatherChannel()
-        channels.append(weatherChannel)
-        guide[weatherChannel.id] = Self.weatherGuideEntries(from: from, to: to)
+        for (channel, entries) in syntheticChannels(from: from, to: to) {
+            channels.append(channel)
+            guide[channel.id] = entries
+        }
 
         self.channels = channels
         self.guide = guide
@@ -364,27 +416,50 @@ final class AppState: ObservableObject {
         }
     }
 
-    // MARK: - Weather channel
+    // MARK: - Synthetic channels
+
+    /// The client-rendered lineup, in channel-number order. Weather is
+    /// always present; the photos and dashboard channels appear only once
+    /// configured in settings. Each is one continuous all-day guide block.
+    private func syntheticChannels(from: Date, to: Date) -> [(Channel, [GuideEntry])] {
+        var lineup: [(Channel, [GuideEntry])] = []
+        if immichClient != nil {
+            let channel = Channel(id: Self.photosChannelId, name: "Photos",
+                                  number: PhotosChannel.number, icon: nil, groupTitle: nil)
+            lineup.append((channel, [Self.allDayEntry(
+                id: "photos-full", channelId: channel.id, from: from, to: to,
+                kind: .photos, title: "FAMILY ALBUM",
+                summary: "A rotating slideshow of your Immich favorite photos."
+            )]))
+        }
+        if dashImageURL != nil {
+            let channel = Channel(id: Self.dashboardChannelId, name: "Home",
+                                  number: HADashboardChannel.number, icon: nil, groupTitle: nil)
+            lineup.append((channel, [Self.allDayEntry(
+                id: "hadash-full", channelId: channel.id, from: from, to: to,
+                kind: .haDashboard, title: "HOME DASHBOARD",
+                summary: "Your Home Assistant dashboard, live from the ha-screencap companion."
+            )]))
+        }
+        let weather = Self.makeWeatherChannel()
+        lineup.append((weather, [Self.allDayEntry(
+            id: "wx-full", channelId: weather.id, from: from, to: to,
+            kind: .weather, title: "LOCAL FORECAST",
+            summary: "Current conditions, extended forecast, and around-the-house readings."
+        )]))
+        return lineup
+    }
 
     static func makeWeatherChannel() -> Channel {
         Channel(id: weatherChannelId, name: "Weather", number: WeatherChannel.number, icon: nil, groupTitle: nil)
     }
 
-    /// One continuous block spanning the whole guide window — weather is
-    /// always on, not a series of programs.
-    static func weatherGuideEntries(from: Date, to: Date) -> [GuideEntry] {
-        [GuideEntry(
-            id: "wx-full",
-            channelId: weatherChannelId,
-            start: from,
-            stop: to,
-            kind: .weather,
-            title: "LOCAL FORECAST",
-            subtitle: nil,
-            summary: "Current conditions, extended forecast, and around-the-house readings.",
-            year: nil,
-            episodeLabel: nil
-        )]
+    private static func allDayEntry(id: String, channelId: String, from: Date, to: Date,
+                                    kind: GuideEntry.Kind, title: String, summary: String) -> GuideEntry {
+        GuideEntry(
+            id: id, channelId: channelId, start: from, stop: to, kind: kind,
+            title: title, subtitle: nil, summary: summary, year: nil, episodeLabel: nil
+        )
     }
 
     func refreshWeather(force: Bool = false) async {
@@ -443,11 +518,13 @@ final class AppState: ObservableObject {
         tunedChannel = channel
         isPaused = false
         UserDefaults.standard.set(channel.id, forKey: "lastChannelId")
-        if channel.id == Self.weatherChannelId {
+        if Self.isSyntheticChannel(channel.id) {
             itemFailureWatch = nil
             clearDemoLoop()
             player.replaceCurrentItem(with: nil)
-            Task { await refreshWeather() }
+            if channel.id == Self.weatherChannelId {
+                Task { await refreshWeather() }
+            }
             return
         }
         if isDemoMode {
@@ -487,7 +564,7 @@ final class AppState: ObservableObject {
 
     private func retryTune() {
         guard let channel = tunedChannel,
-              channel.id != Self.weatherChannelId,
+              !Self.isSyntheticChannel(channel.id),
               retryCount < 3 else { return }
         retryCount += 1
         let target = channel
@@ -503,7 +580,7 @@ final class AppState: ObservableObject {
     /// following tune() lands on a session that's already seconds warm.
     func prefetch(_ channel: Channel) {
         guard isConfigured, !isDemoMode,
-              channel.id != Self.weatherChannelId,
+              !Self.isSyntheticChannel(channel.id),
               channel.id != tunedChannel?.id,
               channel.id != lastPrefetchedChannelId else { return }
         prefetchTask?.cancel()

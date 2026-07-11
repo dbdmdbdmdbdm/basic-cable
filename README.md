@@ -16,6 +16,8 @@
 - Full-screen viewing with channel up/down zapping and a retro channel banner
 - Guide paging in 30-minute steps, ~12 hours of schedule ahead
 - Built-in **weather channel** (channel 999) with a retro "Local on the 8s" style display
+- Optional **Home Assistant dashboard channel** (channel 998) via the bundled [ha-screencap](companion/ha-screencap) companion container
+- Optional **photos channel** (channel 997): a slideshow of your [Immich](https://immich.app) favorites with crossfades and a slow Ken Burns drift
 - No account, no tracking, no dependencies — one small SwiftUI app talking to your own server
 
 ## Requirements
@@ -60,6 +62,16 @@ The app adds a synthetic channel **999 WEATHER** to the guide (Tunarr doesn't kn
 - **Home Assistant (optional)**: enter your HA URL and a [long-lived access token](https://www.home-assistant.io/docs/authentication/#your-account-profile) in Settings, plus a comma-separated list of sensor entity IDs (e.g. `sensor.outdoor_temp, sensor.pool_temp`). Those readings appear on an extra "AROUND THE HOUSE" page of the weather channel. The token is stored on-device and only ever sent to the URL you configure.
 
 Without any of this configured, the weather channel shows a "set location in settings" notice — the rest of the app is unaffected.
+
+## The Home Assistant dashboard channel
+
+Channel **998 HOME** shows one of your Home Assistant dashboards as a TV channel. tvOS has no web engine, so the app can't load the dashboard itself — instead, the small [ha-screencap](companion/ha-screencap) container runs headless Chromium on your network, screenshots the dashboard every few seconds, and the app displays the latest frame. See [companion/ha-screencap/README.md](companion/ha-screencap/README.md) for a two-minute setup; then point **SNAPSHOT URL** in Settings at its `/latest.png` endpoint. The channel only appears in the guide once the URL is configured.
+
+Tip: if the dashboard you capture has camera cards, set them to `camera_view: auto` (stills) — at a 10-second snapshot cadence, `live` mode looks identical but keeps the capture container decoding video around the clock.
+
+## The photos channel
+
+Channel **997 PHOTOS** is a shuffled slideshow of your [Immich](https://immich.app) favorites — 12 seconds per photo with a crossfade, a slow Ken Burns drift, and a month/year stamp. Configure it in Settings with your Immich URL and an API key (Immich → Account Settings → API Keys; `asset.read`, `asset.view` and `album.read` permissions are enough). The channel only appears once both are set. Photos stream directly from your Immich server and are never stored.
 
 ## Remote controls
 

@@ -19,7 +19,7 @@ struct CompactInfoBar: View {
                             .foregroundColor(Theme.onAir)
                     }
                     Spacer()
-                    Text(entry.kind == .weather
+                    Text(entry.isSynthetic
                         ? "ALL DAY"
                         : "\(Theme.timeFormatter.string(from: entry.start)) - \(Theme.timeFormatter.string(from: entry.stop))")
                         .font(Theme.mono(12, weight: .medium))
@@ -39,7 +39,7 @@ struct CompactInfoBar: View {
                             .foregroundColor(Theme.dimText)
                     }
                 }
-                if entry.kind != .weather, entry.airs(at: state.now) {
+                if !entry.isSynthetic, entry.airs(at: state.now) {
                     let total = entry.stop.timeIntervalSince(entry.start)
                     let fraction = total > 0
                         ? min(max(state.now.timeIntervalSince(entry.start) / total, 0), 1)
@@ -83,8 +83,8 @@ struct FullscreenPlayerIOS: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            if state.isWeatherTuned {
-                WeatherSceneView(scale: 0.55)
+            if state.isSyntheticTuned {
+                SyntheticChannelView(scale: 0.55)
                     .ignoresSafeArea()
             } else {
                 PlayerLayerView(player: state.player)
