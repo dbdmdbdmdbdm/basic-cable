@@ -100,9 +100,16 @@ jobs:
               -allowProvisioningUpdates \
               -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8 \
               -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID"
-            xcrun altool --upload-app --type "$TYPE" \
+            # altool can exit 0 even when the upload is rejected (e.g.
+            # Apple's daily upload limit) — fail the run on its own verdict.
+            UPLOAD_OUT=$(xcrun altool --upload-app --type "$TYPE" \
               --file build/Export-$PLATFORM/$SCHEME.ipa \
-              --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID"
+              --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID" 2>&1) || true
+            echo "$UPLOAD_OUT"
+            if echo "$UPLOAD_OUT" | grep -q "UPLOAD FAILED"; then
+              echo "::error::$PLATFORM upload rejected by App Store Connect"
+              exit 1
+            fi
           done
 
       - name: Log build provenance
