@@ -45,6 +45,13 @@ try {
   const opts = JSON.parse(fs.readFileSync(optionsPath, 'utf8'));
   if (opts.app_config_enabled) {
     appConfig = {
+      // The dashboards this add-on captures become the app's dashboard
+      // channels: index maps to /latest/<index>.png on this same origin,
+      // names come from the parallel dash_names option.
+      dashboards: DASH_PATHS.map((path, index) => ({
+        index,
+        name: (opts.dash_names || [])[index] || '',
+      })),
       cameras: opts.cameras || [],
       weather_sensors: opts.weather_sensors || [],
       media_players: opts.media_players || [],
