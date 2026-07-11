@@ -91,13 +91,19 @@ struct SettingsView: View {
                         }
                     }
                     Button("SAVE") { save() }
-                    if !isFirstRun {
+                    if !isFirstRun || state.isDemoMode {
                         Button("CANCEL") {
                             state.showSettings = false
                         }
                     }
                 }
                 .font(Theme.mono(24 * uiScale))
+
+                if isFirstRun {
+                    demoSection
+                }
+
+                aboutSection
             }
             .padding(60 * uiScale)
         }
@@ -110,7 +116,61 @@ struct SettingsView: View {
         }
     }
 
+    @ViewBuilder
+    private var demoSection: some View {
+        VStack(spacing: 14) {
+            Rectangle()
+                .fill(Color(white: 0.25))
+                .frame(maxWidth: 700, maxHeight: 2)
+            if state.isDemoMode {
+                Button("EXIT DEMO") {
+                    state.exitDemo()
+                }
+                .font(Theme.mono(24 * uiScale))
+                Text("Clears the sample channels and returns to setup.")
+                    .font(.system(size: 18 * uiScale))
+                    .foregroundColor(Theme.dimText)
+            } else {
+                Button("TRY THE DEMO") {
+                    state.startDemo()
+                }
+                .font(Theme.mono(24 * uiScale))
+                Text("No Tunarr server? Explore the guide with sample channels and test-pattern video.")
+                    .font(.system(size: 18 * uiScale))
+                    .foregroundColor(Theme.dimText)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .padding(.top, 8)
+    }
+
+    private var aboutSection: some View {
+        VStack(spacing: 6) {
+            Text("BASIC CABLE \(Self.versionString)")
+                .font(Theme.mono(17 * uiScale, weight: .medium))
+                .foregroundColor(Theme.dimText)
+            Text("MIT-LICENSED OPEN SOURCE — GITHUB.COM/DBDMDBDMDBDM/BASIC-CABLE")
+                .font(Theme.mono(15 * uiScale, weight: .medium))
+                .foregroundColor(Theme.dimText)
+            Text("WEATHER DATA BY OPEN-METEO.COM (CC BY 4.0)")
+                .font(Theme.mono(15 * uiScale, weight: .medium))
+                .foregroundColor(Theme.dimText)
+        }
+        .padding(.top, 24)
+        .multilineTextAlignment(.center)
+    }
+
+    private static var versionString: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
+        return "V\(version) (\(build))"
+    }
+
     private func save() {
+        if state.isDemoMode {
+            // Connecting a real server replaces the demo.
+            state.exitDemo(returnToSetup: false)
+        }
         state.serverURLString = urlText.trimmingCharacters(in: .whitespacesAndNewlines)
         state.manualLocation = locationText.trimmingCharacters(in: .whitespacesAndNewlines)
         state.haURLString = haURLText.trimmingCharacters(in: .whitespacesAndNewlines)

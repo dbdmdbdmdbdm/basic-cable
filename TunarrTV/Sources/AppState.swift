@@ -40,8 +40,11 @@ final class AppState: ObservableObject {
     @Published var loadError: String?
     @Published var isBuffering = false
     @Published var isServerReachable = true
+    /// Demo mode: canned lineup + bundled looping clips, no server needed.
+    @Published private(set) var isDemoMode = false
 
     private var missedHeartbeats = 0
+    private var demoLoopObserver: NSObjectProtocol?
 
     let player = AVPlayer()
     let deviceLocation = DeviceLocation()
@@ -102,6 +105,21 @@ final class AppState: ObservableObject {
 
     func bootstrap() async {
         if !isConfigured {
+            // Screenshot/UI-test hook: launch straight into the demo lineup.
+            // Optional: --tune <number> picks the channel, --fullscreen
+            // skips the guide.
+            if CommandLine.arguments.contains("--demo") {
+                startDemo()
+                let args = CommandLine.arguments
+                if let index = args.firstIndex(of: "--tune"), index + 1 < args.count,
+                   let number = Int(args[index + 1]),
+                   let channel = channels.first(where: { $0.number == number }) {
+                    tune(channel)
+                }
+                if args.contains("--fullscreen") { isFullscreen = true }
+                startTimers()
+                return
+            }
             loadError = "Set your Tunarr server URL in SETTINGS"
             isFullscreen = false
             showSettings = true
@@ -113,6 +131,10 @@ final class AppState: ObservableObject {
     }
 
     func reload() async {
+        if isDemoMode {
+            reloadDemoGuide()
+            return
+        }
         guard let client else {
             loadError = "Set your Tunarr server URL in SETTINGS"
             return
@@ -191,6 +213,66 @@ final class AppState: ObservableObject {
         }
     }
 
+    // MARK: - Demo mode
+
+    func startDemo() {
+        isDemoMode = true
+        showSettings = false
+        loadError = nil
+        isServerReachable = true
+        reloadDemoGuide()
+        // Land on the guide — it's the heart of the app.
+        isFullscreen = false
+        if let first = channels.first { tune(first) }
+        Task { await refreshWeather(force: true) }
+    }
+
+    func exitDemo(returnToSetup: Bool = true) {
+        guard isDemoMode else { return }
+        isDemoMode = false
+        clearDemoLoop()
+        player.replaceCurrentItem(with: nil)
+        tunedChannel = nil
+        focusedEntry = nil
+        channels = []
+        guide = [:]
+        guideFetchedThrough = .distantPast
+        weatherData = WeatherData()
+        if returnToSetup {
+            isFullscreen = false
+            showSettings = true
+            loadError = "Set your Tunarr server URL in SETTINGS"
+        }
+    }
+
+    /// (Re)generates the demo guide relative to the current time so a long
+    /// demo session never runs out of listings. Entry ids are deterministic,
+    /// so periodic regeneration doesn't disturb the UI.
+    private func reloadDemoGuide() {
+        let from = earliestWindowStart
+        let to = from.addingTimeInterval(TimeInterval(Self.fetchHours * 3600))
+        var channels = DemoContent.asChannels
+        var guide = DemoContent.guide(from: from, to: to)
+
+        let weatherChannel = Self.makeWeatherChannel()
+        channels.append(weatherChannel)
+        guide[weatherChannel.id] = Self.weatherGuideEntries(from: from, to: to)
+
+        self.channels = channels
+        self.guide = guide
+        self.guideFetchedThrough = to
+        if windowStart < earliestWindowStart {
+            windowStart = earliestWindowStart
+        }
+    }
+
+    private func clearDemoLoop() {
+        if let demoLoopObserver {
+            NotificationCenter.default.removeObserver(demoLoopObserver)
+            self.demoLoopObserver = nil
+        }
+    }
+
     // MARK: - Weather channel
 
     static func makeWeatherChannel() -> Channel {
@@ -239,6 +321,16 @@ final class AppState: ObservableObject {
             longitude = resolved.longitude
         }
 
+        if isDemoMode {
+            if latitude == nil {
+                latitude = DemoContent.fallbackCoordinate.latitude
+                longitude = DemoContent.fallbackCoordinate.longitude
+            }
+            if sensors.isEmpty {
+                sensors = DemoContent.houseSensors
+            }
+        }
+
         guard let latitude, let longitude else {
             weatherData.houseSensors = sensors
             return
@@ -260,8 +352,30 @@ final class AppState: ObservableObject {
         UserDefaults.standard.set(channel.id, forKey: "lastChannelId")
         if channel.id == Self.weatherChannelId {
             itemFailureWatch = nil
+            clearDemoLoop()
             player.replaceCurrentItem(with: nil)
             Task { await refreshWeather() }
+            return
+        }
+        if isDemoMode {
+            itemFailureWatch = nil
+            clearDemoLoop()
+            guard let url = DemoContent.clipURL(for: channel) else {
+                player.replaceCurrentItem(with: nil)
+                return
+            }
+            let item = AVPlayerItem(url: url)
+            let player = self.player
+            demoLoopObserver = NotificationCenter.default.addObserver(
+                forName: AVPlayerItem.didPlayToEndTimeNotification,
+                object: item,
+                queue: .main
+            ) { _ in
+                player.seek(to: .zero)
+                player.play()
+            }
+            player.replaceCurrentItem(with: item)
+            player.play()
             return
         }
         guard let client else { return }
@@ -295,7 +409,7 @@ final class AppState: ObservableObject {
     /// a single GET of the playlist makes the server spin up ffmpeg, so a
     /// following tune() lands on a session that's already seconds warm.
     func prefetch(_ channel: Channel) {
-        guard isConfigured,
+        guard isConfigured, !isDemoMode,
               channel.id != Self.weatherChannelId,
               channel.id != tunedChannel?.id,
               channel.id != lastPrefetchedChannelId else { return }
@@ -380,7 +494,7 @@ final class AppState: ObservableObject {
     /// Pings /api/version; after two consecutive misses the UI shows the
     /// offline banner. Recovery reloads the guide (it's stale by then).
     func heartbeat() async {
-        guard isConfigured, let client else { return }
+        guard !isDemoMode, isConfigured, let client else { return }
         if (try? await client.fetchVersion()) != nil {
             missedHeartbeats = 0
             if !isServerReachable {

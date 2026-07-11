@@ -18,6 +18,13 @@ struct ContentView: View {
                     .padding(.top, 18)
             }
         }
+        .overlay(alignment: .topTrailing) {
+            if state.isDemoMode {
+                DemoBadge()
+                    .padding(.top, 18)
+                    .padding(.trailing, 24)
+            }
+        }
         .sheet(isPresented: $state.showSettings) {
             SettingsView()
         }
@@ -110,6 +117,22 @@ struct ContentView: View {
         }
     }
     #endif
+}
+
+/// Yellow tag pinned top-right whenever demo mode is active, so sample
+/// content is never mistaken for a live lineup.
+struct DemoBadge: View {
+    var body: some View {
+        Text("DEMO")
+            .font(Theme.mono(18))
+            .foregroundColor(.black)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .background(Color(red: 0.95, green: 0.78, blue: 0.12))
+            .cornerRadius(6)
+            .shadow(color: .black.opacity(0.5), radius: 6, y: 2)
+            .allowsHitTesting(false)
+    }
 }
 
 /// Red pill shown at the top of every screen while Tunarr is unreachable.

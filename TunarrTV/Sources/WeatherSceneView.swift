@@ -189,9 +189,12 @@ struct WeatherSceneView: View {
 
     private var tickerBar: some View {
         HStack {
-            Text("LOCAL FORECAST")
+            // Attribution required by Open-Meteo's CC BY 4.0 license.
+            Text("LOCAL FORECAST · WEATHER DATA BY OPEN-METEO.COM")
                 .font(Theme.mono(18 * s))
                 .foregroundColor(.black)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
             Spacer()
             Text(Theme.timeWithPeriodFormatter.string(from: state.now).uppercased())
                 .font(Theme.mono(18 * s))
