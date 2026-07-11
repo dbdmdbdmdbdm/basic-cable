@@ -24,6 +24,15 @@ struct SettingsView: View {
     @State private var locating = false
     @State private var locationStatus: String?
 
+    @State private var sensorSuggestions: [AppState.SuggestedEntity] = []
+    @State private var cameraSuggestions: [AppState.SuggestedEntity] = []
+    @State private var suggesting: Set<String> = []
+
+    @State private var albums: [ImmichAlbum] = []
+    @State private var albumThumbs: [String: UIImage] = [:]
+    @State private var loadingAlbums = false
+    @State private var albumStatus: String?
+
     @State private var showAllSections = false
 
     /// First-run keeps the form to just the Tunarr URL — unless the user
@@ -33,12 +42,32 @@ struct SettingsView: View {
             && !state.hasStandaloneConfig
     }
 
+    /// Field text that differs from what's saved. Toggles, camera
+    /// visibility, and the album choice apply immediately and never
+    /// count as unsaved.
+    private var hasUnsavedChanges: Bool {
+        func trimmed(_ text: String) -> String {
+            text.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return trimmed(urlText) != state.serverURLString
+            || trimmed(locationText) != state.manualLocation
+            || trimmed(haURLText) != state.haURLString
+            || trimmed(haTokenText) != state.haToken
+            || trimmed(haSensorsText) != state.haSensorEntities
+            || trimmed(haCamerasText) != state.haCameraEntities
+            || trimmed(dashURLText) != state.dashImageURLString
+            || trimmed(immichURLText) != state.immichURLString
+            || trimmed(immichKeyText) != state.immichAPIKey
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 30) {
                 Text(isFirstRun ? "CONNECT TO TUNARR" : "SETTINGS")
                     .font(Theme.mono(38 * uiScale))
                     .foregroundColor(.white)
+
+                unsavedBanner
 
                 if isFirstRun {
                     Text("Enter the address of your Tunarr server — the same URL you use for its web UI.")
@@ -75,135 +104,14 @@ struct SettingsView: View {
                 }
 
                 if !isFirstRun || showAllSections {
-                    sectionHeader("WEATHER CHANNEL — \(WeatherChannel.number)", tint: Theme.cellWeather)
-                    field("LOCATION (ZIP, CITY, OR LAT,LON) — USED WITHOUT HOME ASSISTANT",
-                          placeholder: "90210  /  Austin, TX  /  37.77, -122.42", text: $locationText)
-                    HStack(spacing: 16) {
-                        Button(locating ? "LOCATING..." : "USE THIS DEVICE'S LOCATION") {
-                            guard !locating else { return }
-                            locating = true
-                            Task {
-                                if let coordinate = await state.deviceLocation.requestOnce() {
-                                    locationText = String(format: "%.3f, %.3f",
-                                                          coordinate.latitude, coordinate.longitude)
-                                } else {
-                                    locationText = locationText.isEmpty ? "" : locationText
-                                    locationStatus = "LOCATION UNAVAILABLE — CHECK SETTINGS > PRIVACY"
-                                }
-                                locating = false
-                            }
-                        }
-                        .font(Theme.mono(19 * uiScale))
-                        if let locationStatus {
-                            Text(locationStatus)
-                                .font(Theme.mono(17 * uiScale, weight: .medium))
-                                .foregroundColor(Theme.accent)
-                        }
-                    }
-                    .frame(maxWidth: 1000, alignment: .leading)
-                    field("HOME ASSISTANT URL (OPTIONAL)",
-                          placeholder: "http://homeassistant.local:8123", text: $haURLText)
-                    field("HOME ASSISTANT LONG-LIVED TOKEN",
-                          placeholder: "eyJhbGciOi...", text: $haTokenText)
-                    field("HA SENSOR ENTITIES (COMMA-SEPARATED)",
-                          placeholder: "sensor.outdoor_temp, sensor.pool_temp", text: $haSensorsText)
-                    testControl("ha") {
-                        await state.testHomeAssistant(urlString: haURLText, token: haTokenText,
-                                                      sensorEntities: haSensorsText)
-                    }
-
-                    sectionHeader("SECURITY CAMERAS CHANNEL — \(CamerasChannel.number) (OPTIONAL)", tint: Theme.cellCameras)
-                    field("HA CAMERA ENTITIES (COMMA-SEPARATED)",
-                          placeholder: "camera.front_door, camera.backyard", text: $haCamerasText)
-                    Text("Shows all cameras live in one grid as channel \(CamerasChannel.number). Uses the Home Assistant URL and token above — streams come straight from HA, full motion.")
-                        .font(.system(size: 17 * uiScale))
-                        .foregroundColor(Theme.dimText)
-                        .frame(maxWidth: 1000, alignment: .leading)
-                    testControl("cameras") {
-                        await state.testCameras(urlString: haURLText, token: haTokenText,
-                                                cameraEntities: haCamerasText)
-                    }
-                    Toggle(isOn: $state.weatherOverlayOnCameras) {
-                        Text("SHOW WEATHER OVERLAY")
-                            .font(Theme.mono(20 * uiScale, weight: .medium))
-                    }
-                    .frame(maxWidth: 1000)
-                    if !state.cameraEntityIds.isEmpty {
-                        VStack(spacing: 10) {
-                            ForEach(state.cameraEntityIds, id: \.self) { entityId in
-                                Toggle(isOn: cameraVisibilityBinding(entityId)) {
-                                    Text("SHOW \(CameraName.display(entityId))")
-                                        .font(Theme.mono(20 * uiScale, weight: .medium))
-                                }
-                            }
-                        }
-                        .frame(maxWidth: 1000)
-                        Text("Toggles apply immediately — hidden cameras stay in the list above.")
-                            .font(.system(size: 17 * uiScale))
-                            .foregroundColor(Theme.dimText)
-                            .frame(maxWidth: 1000, alignment: .leading)
-                    }
-
-                    sectionHeader("HOME DASHBOARD CHANNEL — \(HADashboardChannel.number) (OPTIONAL)", tint: Theme.cellDashboard)
-                    field("SNAPSHOT URLS (COMMA-SEPARATED, OPTIONAL NAME=URL)",
-                          placeholder: "http://192.168.1.100:8090/latest.png, Kitchen=http://…/latest/1.png",
-                          text: $dashURLText)
-                    Text("Each URL becomes its own channel — the first is \(HADashboardChannel.number), extras count down from 996. Name them like \"Kitchen=http://…\". Just the server address works too (/latest.png is assumed). Snapshots come from the ha-screencap companion (Home Assistant add-on or Docker container — see the GitHub README).")
-                        .font(.system(size: 17 * uiScale))
-                        .foregroundColor(Theme.dimText)
-                        .frame(maxWidth: 1000, alignment: .leading)
-                    testControl("dashboard") {
-                        await state.testDashboard(urlString: dashURLText)
-                    }
-
-                    sectionHeader("PHOTOS CHANNEL — \(PhotosChannel.number) (OPTIONAL)", tint: Theme.cellPhotos)
-                    field("IMMICH URL",
-                          placeholder: "http://192.168.1.100:2283", text: $immichURLText)
-                    field("IMMICH API KEY",
-                          placeholder: "create one in Immich under Account Settings > API Keys", text: $immichKeyText)
-                    Text("Shows a slideshow of your Immich favorites as channel \(PhotosChannel.number). Create the key in Immich under Account Settings → API Keys — it only needs the asset.read and asset.view permissions (nothing else, and never write access).")
-                        .font(.system(size: 17 * uiScale))
-                        .foregroundColor(Theme.dimText)
-                        .frame(maxWidth: 1000, alignment: .leading)
-                    testControl("photos") {
-                        await state.testImmich(urlString: immichURLText, apiKey: immichKeyText)
-                    }
-                    Toggle(isOn: $state.weatherOverlayOnPhotos) {
-                        Text("SHOW WEATHER OVERLAY")
-                            .font(Theme.mono(20 * uiScale, weight: .medium))
-                    }
-                    .frame(maxWidth: 1000)
-
-                    sectionHeader("SYNC")
-                    Toggle(isOn: $state.iCloudSyncEnabled) {
-                        Text("SYNC SETTINGS VIA ICLOUD")
-                            .font(Theme.mono(20 * uiScale, weight: .medium))
-                    }
-                    .frame(maxWidth: 1000)
-                    Text("Shares these settings (including the Home Assistant token) across your devices through your own iCloud account.")
-                        .font(.system(size: 17 * uiScale))
-                        .foregroundColor(Theme.dimText)
-                        .frame(maxWidth: 1000, alignment: .leading)
+                    weatherSection
+                    camerasSection
+                    dashboardSection
+                    photosSection
+                    syncSection
                 }
 
-                HStack(spacing: 24) {
-                    Button(testing ? "TESTING..." : "TEST") {
-                        guard !testing else { return }
-                        testing = true
-                        testResult = nil
-                        Task {
-                            testResult = await state.testConnection(to: urlText)
-                            testing = false
-                        }
-                    }
-                    Button("SAVE") { save() }
-                    if !isFirstRun || state.isDemoMode {
-                        Button("CANCEL") {
-                            state.showSettings = false
-                        }
-                    }
-                }
-                .font(Theme.mono(24 * uiScale))
+                buttonRow
 
                 if isFirstRun {
                     demoSection
@@ -223,6 +131,323 @@ struct SettingsView: View {
             dashURLText = state.dashImageURLString
             immichURLText = state.immichURLString
             immichKeyText = state.immichAPIKey
+        }
+    }
+
+    // MARK: - Sections
+
+    private var weatherSection: some View {
+        section("WEATHER CHANNEL — \(WeatherChannel.number)", tint: Theme.cellWeather) {
+            field("LOCATION (ZIP, CITY, OR LAT,LON) — USED WITHOUT HOME ASSISTANT",
+                  placeholder: "90210  /  Austin, TX  /  37.77, -122.42", text: $locationText)
+            HStack(spacing: 16) {
+                Button(locating ? "LOCATING..." : "USE THIS DEVICE'S LOCATION") {
+                    guard !locating else { return }
+                    locating = true
+                    Task {
+                        if let coordinate = await state.deviceLocation.requestOnce() {
+                            locationText = String(format: "%.3f, %.3f",
+                                                  coordinate.latitude, coordinate.longitude)
+                        } else {
+                            locationStatus = "LOCATION UNAVAILABLE — CHECK SETTINGS > PRIVACY"
+                        }
+                        locating = false
+                    }
+                }
+                .font(Theme.mono(19 * uiScale))
+                if let locationStatus {
+                    Text(locationStatus)
+                        .font(Theme.mono(17 * uiScale, weight: .medium))
+                        .foregroundColor(Theme.accent)
+                }
+            }
+            field("HOME ASSISTANT URL (OPTIONAL)",
+                  placeholder: "http://homeassistant.local:8123", text: $haURLText)
+            field("HOME ASSISTANT LONG-LIVED TOKEN",
+                  placeholder: "eyJhbGciOi...", text: $haTokenText)
+            field("HA SENSOR ENTITIES (COMMA-SEPARATED)",
+                  placeholder: "sensor.outdoor_temp, sensor.pool_temp", text: $haSensorsText)
+            suggestionControl("sensors", suggestions: sensorSuggestions, listText: $haSensorsText,
+                              buttonTitle: "SUGGEST SENSORS") {
+                await state.suggestWeatherSensors(urlString: haURLText, token: haTokenText)
+            } assign: { sensorSuggestions = $0 }
+            testControl("ha") {
+                await state.testHomeAssistant(urlString: haURLText, token: haTokenText,
+                                              sensorEntities: haSensorsText)
+            }
+        }
+    }
+
+    private var camerasSection: some View {
+        section("SECURITY CAMERAS CHANNEL — \(CamerasChannel.number) (OPTIONAL)", tint: Theme.cellCameras) {
+            field("HA CAMERA ENTITIES (COMMA-SEPARATED)",
+                  placeholder: "camera.front_door, camera.backyard", text: $haCamerasText)
+            caption("Shows all cameras live in one grid as channel \(CamerasChannel.number). Uses the Home Assistant URL and token above — streams come straight from HA, full motion.")
+            suggestionControl("cameras", suggestions: cameraSuggestions, listText: $haCamerasText,
+                              buttonTitle: "SUGGEST CAMERAS") {
+                await state.suggestCameras(urlString: haURLText, token: haTokenText)
+            } assign: { cameraSuggestions = $0 }
+            testControl("cameras") {
+                await state.testCameras(urlString: haURLText, token: haTokenText,
+                                        cameraEntities: haCamerasText)
+            }
+            Toggle(isOn: $state.weatherOverlayOnCameras) {
+                Text("SHOW WEATHER OVERLAY")
+                    .font(Theme.mono(20 * uiScale, weight: .medium))
+            }
+            if !state.cameraEntityIds.isEmpty {
+                VStack(spacing: 10) {
+                    ForEach(state.cameraEntityIds, id: \.self) { entityId in
+                        Toggle(isOn: cameraVisibilityBinding(entityId)) {
+                            Text("SHOW \(CameraName.display(entityId))")
+                                .font(Theme.mono(20 * uiScale, weight: .medium))
+                        }
+                    }
+                }
+                caption("Toggles apply immediately — hidden cameras stay in the list above.")
+            }
+        }
+    }
+
+    private var dashboardSection: some View {
+        section("HOME DASHBOARD CHANNEL — \(HADashboardChannel.number) (OPTIONAL)", tint: Theme.cellDashboard) {
+            field("SNAPSHOT URLS (COMMA-SEPARATED, OPTIONAL NAME=URL)",
+                  placeholder: "http://192.168.1.100:8090, Kitchen=http://…/latest/1.png",
+                  text: $dashURLText)
+            caption("Each URL becomes its own channel — the first is \(HADashboardChannel.number), extras count down from 996. Name them like \"Kitchen=http://…\". Just the server address works too (/latest.png is assumed). Snapshots come from the ha-screencap companion (Home Assistant add-on or Docker container — see the GitHub README).")
+            testControl("dashboard") {
+                await state.testDashboard(urlString: dashURLText)
+            }
+        }
+    }
+
+    private var photosSection: some View {
+        section("PHOTOS CHANNEL — \(PhotosChannel.number) (OPTIONAL)", tint: Theme.cellPhotos) {
+            field("IMMICH URL",
+                  placeholder: "http://192.168.1.100:2283", text: $immichURLText)
+            field("IMMICH API KEY",
+                  placeholder: "create one in Immich under Account Settings > API Keys", text: $immichKeyText)
+            caption("Shows a slideshow of your Immich photos as channel \(PhotosChannel.number). Create the key in Immich under Account Settings → API Keys — it only needs the read-only asset.read and asset.view permissions (plus album.read to pick an album below).")
+            albumPicker
+            testControl("photos") {
+                await state.testImmich(urlString: immichURLText, apiKey: immichKeyText)
+            }
+            Toggle(isOn: $state.weatherOverlayOnPhotos) {
+                Text("SHOW WEATHER OVERLAY")
+                    .font(Theme.mono(20 * uiScale, weight: .medium))
+            }
+        }
+    }
+
+    private var syncSection: some View {
+        section("SYNC", tint: Theme.dimText) {
+            Toggle(isOn: $state.iCloudSyncEnabled) {
+                Text("SYNC SETTINGS VIA ICLOUD")
+                    .font(Theme.mono(20 * uiScale, weight: .medium))
+            }
+            caption("Shares these settings (including the Home Assistant token) across your devices through your own iCloud account.")
+        }
+    }
+
+    // MARK: - Album picker
+
+    @ViewBuilder
+    private var albumPicker: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 16) {
+                Button(loadingAlbums ? "LOADING ALBUMS..." : "CHOOSE ALBUM") {
+                    guard !loadingAlbums else { return }
+                    loadingAlbums = true
+                    albumStatus = nil
+                    Task { await loadAlbums() }
+                }
+                .font(Theme.mono(19 * uiScale))
+                Text("SHOWING: \(state.immichAlbumId.isEmpty ? "FAVORITES" : state.immichAlbumName.uppercased())")
+                    .font(Theme.mono(17 * uiScale, weight: .medium))
+                    .foregroundColor(Theme.dimText)
+                if let albumStatus {
+                    Text(albumStatus)
+                        .font(Theme.mono(17 * uiScale, weight: .medium))
+                        .foregroundColor(Theme.accent)
+                }
+            }
+            if !albums.isEmpty {
+                albumRow(id: "", name: "FAVORITES (DEFAULT)", count: nil, thumb: nil)
+                ForEach(albums.prefix(25)) { album in
+                    albumRow(id: album.id, name: album.albumName.uppercased(),
+                             count: album.assetCount, thumb: albumThumbs[album.id])
+                }
+                if albums.count > 25 {
+                    caption("Showing the 25 largest albums.")
+                }
+            }
+        }
+    }
+
+    private func albumRow(id: String, name: String, count: Int?, thumb: UIImage?) -> some View {
+        let selected = state.immichAlbumId == id
+        return Button {
+            state.immichAlbumId = id
+            state.immichAlbumName = id.isEmpty ? "" : name.capitalized
+            Task { await state.reload() } // refresh the guide's channel summary
+        } label: {
+            HStack(spacing: 14) {
+                Group {
+                    if let thumb {
+                        Image(uiImage: thumb)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        ZStack {
+                            Color(white: 0.15)
+                            Image(systemName: id.isEmpty ? "heart.fill" : "photo")
+                                .font(.system(size: 18 * uiScale))
+                                .foregroundColor(Theme.dimText)
+                        }
+                    }
+                }
+                .frame(width: 52 * uiScale, height: 52 * uiScale)
+                .clipped()
+                .cornerRadius(6)
+                Text(name)
+                    .font(Theme.mono(19 * uiScale, weight: .medium))
+                    .lineLimit(1)
+                if let count {
+                    Text("\(count)")
+                        .font(Theme.mono(17 * uiScale, weight: .medium))
+                        .foregroundColor(Theme.dimText)
+                }
+                Spacer()
+                if selected {
+                    Image(systemName: "checkmark")
+                        .foregroundColor(Theme.onAir)
+                }
+            }
+        }
+    }
+
+    private func loadAlbums() async {
+        defer { loadingAlbums = false }
+        guard let client = ImmichClient(urlString: immichURLText, apiKey: immichKeyText) else {
+            albumStatus = "ENTER THE URL AND API KEY FIRST"
+            return
+        }
+        do {
+            let fetched = try await client.fetchAlbums().filter { $0.assetCount > 0 }
+            albums = fetched
+            albumStatus = fetched.isEmpty ? "NO ALBUMS FOUND" : nil
+            // Thumbnails for the visible rows, best-effort.
+            for album in fetched.prefix(25) {
+                guard let assetId = album.albumThumbnailAssetId, albumThumbs[album.id] == nil else { continue }
+                if let (data, response) = try? await URLSession.shared.data(for: client.thumbnailRequest(assetId: assetId)),
+                   (response as? HTTPURLResponse)?.statusCode == 200,
+                   let image = UIImage(data: data) {
+                    albumThumbs[album.id] = image
+                }
+            }
+        } catch {
+            albumStatus = "CAN'T LOAD ALBUMS — DOES THE KEY HAVE album.read?"
+        }
+    }
+
+    // MARK: - Entity suggestions
+
+    /// A SUGGEST button + tappable rows that add/remove entity ids from a
+    /// comma-separated field. Rows show a checkmark once included.
+    private func suggestionControl(_ key: String,
+                                   suggestions: [AppState.SuggestedEntity],
+                                   listText: Binding<String>,
+                                   buttonTitle: String,
+                                   load: @escaping () async -> [AppState.SuggestedEntity],
+                                   assign: @escaping ([AppState.SuggestedEntity]) -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 16) {
+                Button(suggesting.contains(key) ? "SEARCHING..." : buttonTitle) {
+                    guard !suggesting.contains(key) else { return }
+                    suggesting.insert(key)
+                    Task {
+                        assign(await load())
+                        suggesting.remove(key)
+                    }
+                }
+                .font(Theme.mono(19 * uiScale))
+                if suggestions.isEmpty, !suggesting.contains(key) {
+                    Text("USES THE HOME ASSISTANT URL AND TOKEN")
+                        .font(Theme.mono(15 * uiScale, weight: .medium))
+                        .foregroundColor(Theme.dimText)
+                }
+            }
+            ForEach(suggestions) { suggestion in
+                let included = entityList(listText.wrappedValue).contains(suggestion.id)
+                Button {
+                    toggleEntity(suggestion.id, in: listText)
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: included ? "checkmark.circle.fill" : "plus.circle")
+                            .foregroundColor(included ? Theme.onAir : Theme.dimText)
+                        Text(suggestion.id)
+                            .font(Theme.mono(18 * uiScale, weight: .medium))
+                            .lineLimit(1)
+                        Text(suggestion.detail)
+                            .font(Theme.mono(16 * uiScale, weight: .medium))
+                            .foregroundColor(Theme.dimText)
+                        Spacer()
+                    }
+                }
+            }
+        }
+    }
+
+    private func entityList(_ text: String) -> [String] {
+        text.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+
+    private func toggleEntity(_ id: String, in text: Binding<String>) {
+        var list = entityList(text.wrappedValue)
+        if let index = list.firstIndex(of: id) {
+            list.remove(at: index)
+        } else {
+            list.append(id)
+        }
+        text.wrappedValue = list.joined(separator: ", ")
+    }
+
+    // MARK: - Chrome
+
+    @ViewBuilder
+    private var unsavedBanner: some View {
+        if hasUnsavedChanges {
+            Text("● UNSAVED CHANGES — PRESS SAVE BELOW")
+                .font(Theme.mono(19 * uiScale, weight: .medium))
+                .foregroundColor(.black)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 8)
+                .background(Color(red: 0.95, green: 0.78, blue: 0.12))
+                .cornerRadius(6)
+        }
+    }
+
+    private var buttonRow: some View {
+        VStack(spacing: 14) {
+            unsavedBanner
+            HStack(spacing: 24) {
+                Button(testing ? "TESTING..." : "TEST") {
+                    guard !testing else { return }
+                    testing = true
+                    testResult = nil
+                    Task {
+                        testResult = await state.testConnection(to: urlText)
+                        testing = false
+                    }
+                }
+                Button(hasUnsavedChanges ? "SAVE ●" : "SAVE") { save() }
+                if !isFirstRun || state.isDemoMode {
+                    Button("CANCEL") {
+                        state.showSettings = false
+                    }
+                }
+            }
+            .font(Theme.mono(24 * uiScale))
         }
     }
 
@@ -345,7 +570,6 @@ struct SettingsView: View {
                     .cornerRadius(6)
             }
         }
-        .frame(maxWidth: 1000, alignment: .leading)
     }
 
     /// Show/hide state for one camera in the grid. Applied immediately
@@ -363,14 +587,13 @@ struct SettingsView: View {
         )
     }
 
-    /// Section break: a rule across the settings column, then the title
-    /// with a color chip matching the channel's guide-cell color — so the
-    /// sections read as distinct blocks instead of one long form.
-    private func sectionHeader(_ title: String, tint: Color = Theme.dimText) -> some View {
-        VStack(alignment: .leading, spacing: 16 * uiScale) {
-            Rectangle()
-                .fill(Color(white: 0.24))
-                .frame(height: 2)
+    // MARK: - Building blocks
+
+    /// One settings section as a card: the channel's guide color tints the
+    /// whole background and border, so sections read as distinct blocks.
+    private func section<Content: View>(_ title: String, tint: Color,
+                                        @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 22 * uiScale) {
             HStack(spacing: 12 * uiScale) {
                 Rectangle()
                     .fill(tint)
@@ -378,10 +601,21 @@ struct SettingsView: View {
                 Text(title)
                     .font(Theme.mono(24 * uiScale))
                     .foregroundColor(.white)
+                Spacer(minLength: 0)
             }
+            content()
         }
-        .frame(maxWidth: 1000, alignment: .leading)
-        .padding(.top, 30 * uiScale)
+        .padding(28 * uiScale)
+        .frame(maxWidth: 1080)
+        .background(RoundedRectangle(cornerRadius: 14).fill(tint.opacity(0.10)))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(tint.opacity(0.35), lineWidth: 2))
+    }
+
+    private func caption(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 17 * uiScale))
+            .foregroundColor(Theme.dimText)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func field(_ label: String, placeholder: String, text: Binding<String>) -> some View {

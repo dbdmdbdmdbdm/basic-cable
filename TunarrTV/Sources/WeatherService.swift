@@ -201,6 +201,38 @@ struct HAClient {
         return summary
     }
 
+    struct EntitySummary {
+        let entityId: String
+        let name: String?
+        let state: String
+        let unit: String?
+        let deviceClass: String?
+    }
+
+    /// Every entity's id/state/attributes — used to suggest sensor and
+    /// camera entities in settings.
+    func fetchEntitySummaries() async throws -> [EntitySummary] {
+        struct RawState: Decodable {
+            let entity_id: String
+            let state: String
+            let attributes: Attrs
+            struct Attrs: Decodable {
+                let friendly_name: String?
+                let unit_of_measurement: String?
+                let device_class: String?
+            }
+        }
+        var request = request(path: "api/states")
+        request.timeoutInterval = 15
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw HAError.unreachable }
+        return try JSONDecoder().decode([RawState].self, from: data).map {
+            EntitySummary(entityId: $0.entity_id, name: $0.attributes.friendly_name,
+                          state: $0.state, unit: $0.attributes.unit_of_measurement,
+                          deviceClass: $0.attributes.device_class)
+        }
+    }
+
     func entityExists(_ entityId: String) async -> Bool {
         guard let (_, response) = try? await URLSession.shared.data(for: request(path: "api/states/\(entityId)")) else {
             return false

@@ -52,6 +52,13 @@ final class AppState: ObservableObject {
     @Published var immichAPIKey: String {
         didSet { persist(immichAPIKey, forKey: "immichKey") }
     }
+    /// Album feeding the photos channel; empty = favorites (the default).
+    @Published var immichAlbumId: String {
+        didSet { persist(immichAlbumId, forKey: "immichAlbumId") }
+    }
+    @Published var immichAlbumName: String {
+        didSet { persist(immichAlbumName, forKey: "immichAlbumName") }
+    }
     /// Current-conditions badge over the photos / cameras channels.
     /// Persisted as "true"/"false" strings to ride the same sync plumbing
     /// as the text settings.
@@ -229,6 +236,8 @@ final class AppState: ObservableObject {
         dashImageURLString = setting("dashImageURL")
         immichURLString = setting("immichURL")
         immichAPIKey = setting("immichKey")
+        immichAlbumId = setting("immichAlbumId")
+        immichAlbumName = setting("immichAlbumName")
         weatherOverlayOnPhotos = setting("weatherOverlayPhotos") == "true"
         weatherOverlayOnCameras = setting("weatherOverlayCameras") == "true"
         windowStart = Self.floorToQuarterHour(Date())
@@ -277,6 +286,8 @@ final class AppState: ObservableObject {
         persist(dashImageURLString, forKey: "dashImageURL")
         persist(immichURLString, forKey: "immichURL")
         persist(immichAPIKey, forKey: "immichKey")
+        persist(immichAlbumId, forKey: "immichAlbumId")
+        persist(immichAlbumName, forKey: "immichAlbumName")
         persist(weatherOverlayOnPhotos ? "true" : "false", forKey: "weatherOverlayPhotos")
         persist(weatherOverlayOnCameras ? "true" : "false", forKey: "weatherOverlayCameras")
     }
@@ -324,6 +335,10 @@ final class AppState: ObservableObject {
             case "immichKey" where value != immichAPIKey:
                 immichAPIKey = value
                 lineupChanged = true
+            case "immichAlbumId" where value != immichAlbumId:
+                immichAlbumId = value
+            case "immichAlbumName" where value != immichAlbumName:
+                immichAlbumName = value
             case "weatherOverlayPhotos":
                 weatherOverlayOnPhotos = value == "true"
             case "weatherOverlayCameras":
@@ -559,7 +574,9 @@ final class AppState: ObservableObject {
             lineup.append((channel, [Self.allDayEntry(
                 id: "photos-full", channelId: channel.id, from: from, to: to,
                 kind: .photos, title: "FAMILY ALBUM",
-                summary: "A rotating slideshow of your Immich favorite photos."
+                summary: immichAlbumId.isEmpty
+                    ? "A rotating slideshow of your Immich favorite photos."
+                    : "A rotating slideshow of your \"\(immichAlbumName)\" album."
             )]))
         }
         for (index, dashboard) in dashboards.enumerated() {
@@ -945,18 +962,63 @@ final class AppState: ObservableObject {
             return .init(message: "FAILED — ENTER THE URL AND API KEY FIRST")
         }
         do {
-            let favorites = try await client.fetchFavorites()
-            guard let sample = favorites.randomElement() else {
-                return .init(message: "OK — CONNECTED, BUT NO FAVORITES YET")
+            let usingAlbum = !immichAlbumId.isEmpty
+            let assets = try await (usingAlbum
+                ? client.fetchAlbumAssets(albumId: immichAlbumId)
+                : client.fetchFavorites())
+            let source = usingAlbum ? "\"\(immichAlbumName.uppercased())\"" : "FAVORITES"
+            guard let sample = assets.randomElement() else {
+                return .init(message: "OK — CONNECTED, BUT \(source) IS EMPTY")
             }
             var preview: UIImage?
             if let (data, response) = try? await URLSession.shared.data(for: client.imageRequest(for: sample)),
                (response as? HTTPURLResponse)?.statusCode == 200 {
                 preview = UIImage(data: data)
             }
-            return .init(message: "OK — \(favorites.count) FAVORITE PHOTOS", preview: preview)
+            return .init(message: "OK — \(source): \(assets.count) PHOTOS", preview: preview)
         } catch {
             return .init(message: "FAILED — CHECK THE URL AND API KEY")
         }
+    }
+
+    // MARK: - Entity suggestions (settings)
+
+    struct SuggestedEntity: Identifiable {
+        let id: String
+        let detail: String
+    }
+
+    /// Likely "around the house" readings: temperature and humidity
+    /// sensors with a live numeric state.
+    func suggestWeatherSensors(urlString: String, token: String) async -> [SuggestedEntity] {
+        guard let ha = HAClient(urlString: urlString, token: token),
+              let entities = try? await ha.fetchEntitySummaries() else { return [] }
+        let interesting = entities.filter { entity in
+            guard entity.entityId.hasPrefix("sensor."), Double(entity.state) != nil else { return false }
+            if let deviceClass = entity.deviceClass, ["temperature", "humidity"].contains(deviceClass) {
+                return true
+            }
+            return ["°F", "°C"].contains(entity.unit ?? "")
+        }
+        // Temperature first, then humidity; stable name order within each.
+        let ranked = interesting.sorted {
+            let left = ($0.deviceClass == "temperature" ? 0 : 1, $0.entityId)
+            let right = ($1.deviceClass == "temperature" ? 0 : 1, $1.entityId)
+            return left < right
+        }
+        return ranked.prefix(20).map {
+            SuggestedEntity(id: $0.entityId, detail: "\($0.state)\($0.unit ?? "")")
+        }
+    }
+
+    /// Cameras with a live feed (unavailable ones are left out).
+    func suggestCameras(urlString: String, token: String) async -> [SuggestedEntity] {
+        guard let ha = HAClient(urlString: urlString, token: token),
+              let entities = try? await ha.fetchEntitySummaries() else { return [] }
+        return entities
+            .filter { $0.entityId.hasPrefix("camera.") && !["unavailable", "unknown"].contains($0.state) }
+            .sorted { $0.entityId < $1.entityId }
+            .prefix(20)
+            .map { SuggestedEntity(id: $0.entityId, detail: $0.state.uppercased()) }
     }
 }

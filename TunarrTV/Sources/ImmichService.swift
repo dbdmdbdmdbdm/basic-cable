@@ -3,6 +3,7 @@ import Foundation
 struct ImmichAsset: Identifiable, Decodable, Hashable {
     let id: String
     let localDateTime: String?
+    let type: String?
     let exifInfo: ExifInfo?
 
     struct ExifInfo: Decodable, Hashable {
@@ -84,8 +85,16 @@ struct ImmichAsset: Identifiable, Decodable, Hashable {
     }
 }
 
+struct ImmichAlbum: Identifiable, Decodable, Hashable {
+    let id: String
+    let albumName: String
+    let assetCount: Int
+    let albumThumbnailAssetId: String?
+}
+
 /// Optional Immich integration: feeds the synthetic photos channel with the
-/// user's favorite photos. Auth is an Immich API key sent as x-api-key.
+/// user's favorite photos (or a chosen album). Auth is an Immich API key
+/// sent as x-api-key.
 struct ImmichClient {
     let baseURL: URL
     let apiKey: String
@@ -101,14 +110,27 @@ struct ImmichClient {
 
     /// All favorite photos (videos excluded), paginated defensively.
     func fetchFavorites() async throws -> [ImmichAsset] {
+        try await search(SearchBody(isFavorite: true, albumIds: nil))
+    }
+
+    /// The photos in one album. The /api/albums/{id} endpoint stopped
+    /// returning assets in current Immich — album contents come from the
+    /// same metadata search the favorites use, filtered by albumIds.
+    func fetchAlbumAssets(albumId: String) async throws -> [ImmichAsset] {
+        try await search(SearchBody(isFavorite: nil, albumIds: [albumId]))
+    }
+
+    private func search(_ body: SearchBody) async throws -> [ImmichAsset] {
         var all: [ImmichAsset] = []
-        for page in 1...5 {
+        for page in 1...40 {
+            var pagedBody = body
+            pagedBody.page = page
             var request = URLRequest(url: baseURL.appendingPathComponent("api/search/metadata"))
             request.httpMethod = "POST"
             request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.timeoutInterval = 15
-            request.httpBody = try JSONEncoder().encode(SearchBody(page: page))
+            request.httpBody = try JSONEncoder().encode(pagedBody)
             let (data, response) = try await URLSession.shared.data(for: request)
             guard (response as? HTTPURLResponse)?.statusCode == 200 else {
                 throw URLError(.badServerResponse)
@@ -118,6 +140,32 @@ struct ImmichClient {
             if decoded.assets.nextPage == nil { break }
         }
         return all
+    }
+
+    /// All albums visible to the API key (needs the album.read permission).
+    func fetchAlbums() async throws -> [ImmichAlbum] {
+        var request = URLRequest(url: baseURL.appendingPathComponent("api/albums"))
+        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        request.timeoutInterval = 15
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw URLError(.badServerResponse)
+        }
+        return try JSONDecoder().decode([ImmichAlbum].self, from: data)
+            .sorted { $0.assetCount > $1.assetCount }
+    }
+
+    /// Small thumbnail by asset id — used for album rows in settings.
+    func thumbnailRequest(assetId: String) -> URLRequest {
+        var components = URLComponents(
+            url: baseURL.appendingPathComponent("api/assets/\(assetId)/thumbnail"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [URLQueryItem(name: "size", value: "thumbnail")]
+        var request = URLRequest(url: components.url!)
+        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        request.timeoutInterval = 15
+        return request
     }
 
     func imageRequest(for asset: ImmichAsset) -> URLRequest {
@@ -133,11 +181,12 @@ struct ImmichClient {
     }
 
     private struct SearchBody: Encodable {
-        var isFavorite = true
+        var isFavorite: Bool?
+        var albumIds: [String]?
         var type = "IMAGE"
         var size = 1000
         var withExif = true
-        var page: Int
+        var page = 1
     }
 
     private struct SearchResponse: Decodable {

@@ -211,7 +211,12 @@ struct PhotoSceneView: View {
             }
         }
         .animation(.easeInOut(duration: 1.2), value: slideIndex)
-        .task { await run() }
+        // Restart the slideshow when the chosen album changes in settings.
+        .task(id: state.immichAlbumId) {
+            panes = []
+            status = "LOADING PHOTOS..."
+            await run()
+        }
     }
 
     private func run() async {
@@ -221,13 +226,17 @@ struct PhotoSceneView: View {
         }
         var assets: [ImmichAsset]
         do {
-            assets = try await client.fetchFavorites()
+            assets = try await (state.immichAlbumId.isEmpty
+                ? client.fetchFavorites()
+                : client.fetchAlbumAssets(albumId: state.immichAlbumId))
         } catch {
             status = "CAN'T REACH IMMICH\nCHECK THE URL AND API KEY IN SETTINGS"
             return
         }
         guard !assets.isEmpty else {
-            status = "NO FAVORITES IN IMMICH YET"
+            status = state.immichAlbumId.isEmpty
+                ? "NO FAVORITES IN IMMICH YET"
+                : "THAT ALBUM HAS NO PHOTOS"
             return
         }
 
