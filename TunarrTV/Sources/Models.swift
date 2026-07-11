@@ -160,12 +160,22 @@ extension GuideEntry {
             let showTitle = program?.show?.title
             let episodeTitle = program?.title
             let isEpisode = program?.type == "episode"
+            // Sports libraries number their seasons by year (Formula 1's
+            // season 2021 is the 2021 championship). There the episode IS
+            // the event — show "France (Race) · 2021", not "Formula 1".
+            let seasonIndex = program?.season?.index
+            let seasonIsYear = (1950...2100).contains(seasonIndex ?? 0)
 
             let title: String
             let subtitle: String?
             if isEpisode, let showTitle, !showTitle.isEmpty {
-                title = showTitle
-                subtitle = episodeTitle
+                if seasonIsYear, let episodeTitle, !episodeTitle.isEmpty, let seasonIndex {
+                    title = "\(episodeTitle) · \(seasonIndex)"
+                    subtitle = showTitle
+                } else {
+                    title = showTitle
+                    subtitle = episodeTitle
+                }
             } else {
                 title = episodeTitle ?? channelName
                 subtitle = nil
@@ -173,7 +183,9 @@ extension GuideEntry {
 
             var episodeLabel: String?
             if let ep = program?.episodeNumber {
-                if let season = program?.season?.index {
+                if seasonIsYear {
+                    episodeLabel = nil // the year is already in the title
+                } else if let season = seasonIndex {
                     episodeLabel = "S\(season) E\(ep)"
                 } else {
                     episodeLabel = "E\(ep)"
@@ -189,7 +201,7 @@ extension GuideEntry {
                 title: title,
                 subtitle: subtitle,
                 summary: program?.summary,
-                year: program?.year,
+                year: program?.year ?? (seasonIsYear ? seasonIndex : nil),
                 episodeLabel: episodeLabel
             )
         case "flex":
