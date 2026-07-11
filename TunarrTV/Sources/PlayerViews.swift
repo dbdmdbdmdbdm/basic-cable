@@ -73,10 +73,16 @@ struct FullscreenPlayerView: View {
         }
         .focusable(true)
         .focused($focused)
-        // Select press returns to the guide (Menu via onExitCommand does too).
+        // Select press returns to the guide (Menu via onExitCommand does too);
+        // press-and-hold select opens quick options instead.
         .onTapGesture {
             guard !showQuickPanel else { return }
             state.isFullscreen = false
+        }
+        .onLongPressGesture(minimumDuration: 0.6) {
+            guard !showQuickPanel else { return }
+            showQuickPanel = true
+            panelFocused = true
         }
         .onPlayPauseCommand { state.togglePause() }
         .onMoveCommand { direction in
@@ -133,7 +139,7 @@ struct FullscreenPlayerView: View {
                         .font(Theme.mono(24, weight: .medium))
                 }
                 .focused($panelFocused)
-                Text("NOW PLAYING FROM YOUR MEDIA PLAYERS + WEATHER · SET PLAYERS IN SETTINGS · MENU TO CLOSE")
+                Text("HOLD SELECT ANYTIME FOR THIS PANEL · SET PLAYERS IN SETTINGS · MENU TO CLOSE")
                     .font(Theme.mono(15, weight: .medium))
                     .foregroundColor(Theme.dimText)
             }

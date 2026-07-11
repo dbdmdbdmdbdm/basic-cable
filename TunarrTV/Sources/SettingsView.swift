@@ -248,7 +248,7 @@ struct SettingsView: View {
         section("NOW PLAYING TICKER (OPTIONAL)", tint: Color(white: 0.55)) {
             field("HA MEDIA PLAYER ENTITIES (COMMA-SEPARATED)",
                   placeholder: "media_player.living_room, media_player.kitchen", text: $mediaPlayersText)
-            caption("A news-style black bar along the bottom of any channel: what's playing on these media players on the left (speakers playing the same thing collapse to one), weather and clock on the right. Turn it on per channel while watching — press LEFT or RIGHT on the remote (the ticker button on iPhone). Uses the Home Assistant URL and token above.")
+            caption("A news-style black bar along the bottom of any channel: what's playing on these media players on the left (speakers playing the same thing collapse to one), weather and clock on the right. Turn it on per channel while watching — hold SELECT on the remote (or press LEFT/RIGHT); the ticker button on iPhone. Uses the Home Assistant URL and token above.")
             suggestionControl("mediaplayers", suggestions: mediaPlayerSuggestions, listText: $mediaPlayersText,
                               buttonTitle: "SUGGEST MEDIA PLAYERS") {
                 await state.suggestMediaPlayers(urlString: haURLText, token: haTokenText)
