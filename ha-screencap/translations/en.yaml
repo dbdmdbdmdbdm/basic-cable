@@ -1,0 +1,84 @@
+configuration:
+  token:
+    name: Home Assistant access token
+    description: >-
+      Long-lived access token the capture browser uses to log into Home
+      Assistant (create one on your HA profile page under Security). Also
+      used by nothing else — snapshots stay on your network.
+  dash_paths:
+    name: Dashboards to capture
+    description: >-
+      One entry per dashboard, using the path from your browser's URL bar
+      (for example /lovelace/0 or /dashboard-family/tv). The first serves
+      at /latest.png, the second at /latest/1.png, and so on.
+  dash_names:
+    name: Dashboard channel names
+    description: >-
+      Optional names matching the dashboards above, in the same order
+      (for example Home, Kitchen). With "Manage the Basic Cable app"
+      enabled, each captured dashboard automatically becomes its own
+      channel in the app under this name.
+  interval_seconds:
+    name: Capture interval (seconds)
+    description: >-
+      Idle time between capture rounds. With several dashboards, each one
+      refreshes roughly this interval plus a few seconds of navigation
+      per extra dashboard.
+  width:
+    name: Capture width (pixels)
+  height:
+    name: Capture height (pixels)
+  dark_mode:
+    name: Dark mode
+    description: Render the dashboards with the dark color scheme.
+  reload_minutes:
+    name: Full reload interval (minutes)
+    description: >-
+      How often the capture page does a full reload (single-dashboard
+      mode only — multiple dashboards re-render on every pass anyway).
+  ha_url:
+    name: Home Assistant URL
+    description: >-
+      How the capture browser reaches HA. The default
+      http://homeassistant:8123 works on Home Assistant OS — only change
+      it for unusual network setups.
+  app_config_enabled:
+    name: Manage the Basic Cable app from this add-on
+    description: >-
+      Serve the options below at /appconfig. The Basic Cable app picks
+      them up automatically (through the snapshot address it already has)
+      and they OVERRIDE the lists typed in the app's own settings — so
+      cameras, weather sensors, dashboards, and the ticker are all
+      managed right here.
+  cameras:
+    name: "App · Security cameras channel"
+    description: >-
+      Camera entities for the live CCTV wall (channel 951). The order
+      here is the order in the grid — first entry is CAM 1.
+  weather_sensors:
+    name: "App · Weather channel sensors"
+    description: >-
+      Sensor entities for the weather channel's "around the house" page
+      and readings (for example sensor.outdoor_temp, sensor.pool_temp).
+  media_players:
+    name: "App · Ticker now-playing sources"
+    description: >-
+      Media players the bottom ticker watches. Players playing the same
+      thing (grouped speakers) collapse into one entry with a count; a
+      soundbar's generic "TV" title is resolved to what the room's TV is
+      actually playing.
+  ticker_scroll:
+    name: "App · Ticker news-crawl scrolling"
+    description: >-
+      On: the left side of the ticker scrolls continuously like a classic
+      news crawl. Off: it sits static and rotates between items.
+  ticker_entities:
+    name: "App · Ticker extra entities"
+    description: >-
+      Extra items for the ticker, each optionally conditional. Fields:
+      entity (required); show_when — only show while the state matches,
+      e.g. open (omit to always show); name — defaults to the entity's
+      friendly name; color — red, orange, yellow, green, mint, teal,
+      cyan, blue, purple, pink, white, gray; icon — any SF Symbol name,
+      e.g. exclamationmark.triangle.fill; display — name_state (default),
+      name, or state.

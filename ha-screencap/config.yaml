@@ -1,5 +1,5 @@
 name: Basic Cable Screencap
-version: "1.2.1"
+version: "1.2.2"
 slug: ha_screencap
 description: Serves PNG snapshots of your dashboards for the Basic Cable app's Home Dashboard channels
 url: https://github.com/dbdmdbdmdbdm/basic-cable
@@ -17,6 +17,7 @@ options:
   token: ""
   dash_paths:
     - /lovelace/0
+  dash_names: []
   interval_seconds: 10
   width: 1920
   height: 1080
@@ -24,7 +25,6 @@ options:
   reload_minutes: 60
   ha_url: http://homeassistant:8123
   app_config_enabled: false
-  dash_names: []
   cameras: []
   weather_sensors: []
   media_players: []
@@ -34,6 +34,8 @@ schema:
   token: password
   dash_paths:
     - str
+  dash_names:
+    - str
   interval_seconds: int(3,300)
   width: int(480,3840)
   height: int(320,2160)
@@ -41,8 +43,6 @@ schema:
   reload_minutes: int(1,1440)
   ha_url: url
   app_config_enabled: bool
-  dash_names:
-    - str
   cameras:
     - str
   weather_sensors:
