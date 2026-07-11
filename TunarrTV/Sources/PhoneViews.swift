@@ -119,12 +119,14 @@ struct FullscreenPlayerIOS: View {
                         }
                 )
 
+            // Content stays within the safe area (rounded corners, home
+            // indicator would clip it); the bar's background still bleeds
+            // to the physical edges.
             if state.tickerEnabled {
                 VStack {
                     Spacer()
                     ChannelTickerView(compact: true)
                 }
-                .ignoresSafeArea()
             }
 
             if showControls {

@@ -22,7 +22,9 @@ struct ChannelTickerView: View {
         .padding(.horizontal, compact ? 16 : 48)
         .frame(maxWidth: .infinity)
         .frame(height: compact ? 34 : 58)
-        .background(Color.black)
+        // The bar's black bleeds past the safe area (device corners, home
+        // indicator) while the text above stays inside it.
+        .background(Color.black.ignoresSafeArea())
         .overlay(Rectangle().fill(Color(white: 0.22)).frame(height: 1), alignment: .top)
         .task { await poll() }
     }
