@@ -14,6 +14,8 @@ struct SyntheticChannelView: View {
             DashboardSceneView(compact: compact)
         } else if state.isPhotosTuned {
             PhotoSceneView(compact: compact)
+        } else if state.isCamerasTuned {
+            CamerasSceneView(compact: compact)
         }
     }
 }

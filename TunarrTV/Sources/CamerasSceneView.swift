@@ -1,0 +1,295 @@
+import SwiftUI
+import AVFoundation
+
+// MARK: - HA camera stream API
+
+/// Fetches a tokenized HLS URL for a camera entity over the Home Assistant
+/// websocket API (`camera/stream`). The returned URL embeds its own access
+/// token in the path, so AVPlayer can play it with no auth headers — and HA
+/// proxies the camera's own stream, so there's no transcode load.
+enum HACameraStream {
+    enum StreamError: Error {
+        case badURL
+        case authFailed
+        case requestFailed(String)
+    }
+
+    static func fetchStreamURL(haURLString: String, token: String, entityId: String) async throws -> URL {
+        let trimmed = haURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard var components = URLComponents(string: trimmed),
+              let scheme = components.scheme,
+              let baseURL = URL(string: trimmed) else { throw StreamError.badURL }
+        components.scheme = scheme == "https" ? "wss" : "ws"
+        components.path = "/api/websocket"
+        guard let wsURL = components.url else { throw StreamError.badURL }
+
+        var request = URLRequest(url: wsURL)
+        request.timeoutInterval = 10
+        let socket = URLSession.shared.webSocketTask(with: request)
+        socket.resume()
+        defer { socket.cancel(with: .normalClosure, reason: nil) }
+
+        func receive() async throws -> [String: Any] {
+            let data: Data
+            switch try await socket.receive() {
+            case .string(let text): data = Data(text.utf8)
+            case .data(let raw): data = raw
+            @unknown default: data = Data()
+            }
+            return (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+        }
+        func send(_ payload: [String: Any]) async throws {
+            let data = try JSONSerialization.data(withJSONObject: payload)
+            try await socket.send(.string(String(decoding: data, as: UTF8.self)))
+        }
+
+        // Handshake: auth_required → auth → auth_ok.
+        _ = try await receive()
+        try await send(["type": "auth", "access_token": token])
+        guard try await receive()["type"] as? String == "auth_ok" else {
+            throw StreamError.authFailed
+        }
+
+        try await send(["id": 1, "type": "camera/stream", "entity_id": entityId])
+        // Skip any unrelated frames until our result arrives.
+        for _ in 0..<10 {
+            let reply = try await receive()
+            guard reply["id"] as? Int == 1, reply["type"] as? String == "result" else { continue }
+            guard reply["success"] as? Bool == true,
+                  let result = reply["result"] as? [String: Any],
+                  let path = result["url"] as? String,
+                  let url = URL(string: path, relativeTo: baseURL) else {
+                let message = ((reply["error"] as? [String: Any])?["message"] as? String) ?? "STREAM UNAVAILABLE"
+                throw StreamError.requestFailed(message)
+            }
+            return url.absoluteURL
+        }
+        throw StreamError.requestFailed("NO RESPONSE")
+    }
+}
+
+/// "camera.front_door" → "FRONT DOOR"
+enum CameraName {
+    static func display(_ entityId: String) -> String {
+        let raw = entityId.split(separator: ".").last.map(String.init) ?? entityId
+        return raw.replacingOccurrences(of: "_", with: " ").uppercased()
+    }
+}
+
+// MARK: - Cameras channel
+
+/// A bank of live security-camera feeds in one grid — every visible camera
+/// plays full-motion HLS at once, retro CCTV monitor style. Which cameras
+/// show is toggled per-camera in Settings.
+struct CamerasSceneView: View {
+    @EnvironmentObject var state: AppState
+    var compact = false
+
+    var body: some View {
+        let cameras = state.visibleCameraIds
+        GeometryReader { geo in
+            ZStack {
+                Color.black
+                if state.haClient == nil {
+                    message("SET THE HOME ASSISTANT URL AND TOKEN IN SETTINGS")
+                } else if state.cameraEntityIds.isEmpty {
+                    message("ADD CAMERA ENTITIES IN SETTINGS")
+                } else if cameras.isEmpty {
+                    message("ALL CAMERAS HIDDEN — TOGGLE THEM ON IN SETTINGS")
+                } else {
+                    grid(cameras, in: geo.size)
+                }
+            }
+        }
+    }
+
+    private func message(_ text: String) -> some View {
+        VStack(spacing: 14) {
+            Image(systemName: "video.slash.fill")
+                .font(.system(size: compact ? 30 : 54))
+                .foregroundColor(Theme.dimText)
+            Text(text)
+                .font(Theme.mono(compact ? 14 : 24))
+                .foregroundColor(Theme.dimText)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40)
+        }
+    }
+
+    private func grid(_ cameras: [String], in size: CGSize) -> some View {
+        let columns = cameras.count == 1 ? 1 : (cameras.count <= 4 ? 2 : 3)
+        let rows = Int(ceil(Double(cameras.count) / Double(columns)))
+        let tileWidth = size.width / CGFloat(columns)
+        let tileHeight = size.height / CGFloat(rows)
+        return VStack(spacing: 0) {
+            ForEach(0..<rows, id: \.self) { row in
+                HStack(spacing: 0) {
+                    ForEach(0..<columns, id: \.self) { column in
+                        let index = row * columns + column
+                        if index < cameras.count {
+                            CameraTileView(entityId: cameras[index], index: index, compact: compact)
+                                .frame(width: tileWidth, height: tileHeight)
+                        } else {
+                            // Empty slot in the bank — dead monitor.
+                            ZStack {
+                                Color.black
+                                Text("NO INPUT")
+                                    .font(Theme.mono(compact ? 10 : 18))
+                                    .foregroundColor(Color(white: 0.25))
+                            }
+                            .frame(width: tileWidth, height: tileHeight)
+                            .border(Color(white: 0.18), width: 1)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// One monitor in the bank: fetches its HLS URL over the HA websocket,
+/// plays muted, and re-requests a fresh stream if playback dies or stalls
+/// (HA reaps idle HLS sessions; a stale token means a dead item).
+private struct CameraTileView: View {
+    @EnvironmentObject var state: AppState
+    let entityId: String
+    let index: Int
+    var compact = false
+
+    @State private var player: AVPlayer?
+    @State private var status = "CONNECTING..."
+
+    var body: some View {
+        ZStack {
+            Color.black
+            if let player {
+                PlayerLayerView(player: player, gravity: .resizeAspectFill)
+            } else {
+                Text(status)
+                    .font(Theme.mono(compact ? 10 : 18))
+                    .foregroundColor(Theme.dimText)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 12)
+            }
+            overlay
+        }
+        .border(Color(white: 0.18), width: 1)
+        .task(id: entityId) { await run() }
+    }
+
+    private var overlay: some View {
+        let fontSize: CGFloat = compact ? 9 : 17
+        return VStack {
+            HStack(alignment: .top) {
+                Text("CAM \(index + 1) · \(CameraName.display(entityId))")
+                    .font(Theme.mono(fontSize, weight: .medium))
+                    .foregroundColor(.white.opacity(0.9))
+                    .shadow(color: .black, radius: 0, x: 1, y: 1)
+                    .lineLimit(1)
+                Spacer()
+                if player != nil {
+                    RecordingDot(size: compact ? 5 : 9, fontSize: fontSize)
+                }
+            }
+            Spacer()
+            HStack {
+                if player != nil {
+                    TimestampView(fontSize: fontSize)
+                }
+                Spacer()
+            }
+        }
+        .padding(compact ? 5 : 12)
+    }
+
+    private func run() async {
+        // Tear down when the camera list changes out from under us.
+        defer { player?.pause() }
+        while !Task.isCancelled {
+            guard let ha = state.haClient else {
+                status = "NOT CONFIGURED"
+                return
+            }
+            do {
+                let url = try await HACameraStream.fetchStreamURL(
+                    haURLString: ha.baseURL.absoluteString, token: ha.token, entityId: entityId)
+                guard !Task.isCancelled else { return }
+                let item = AVPlayerItem(url: url)
+                let player = self.player ?? AVPlayer()
+                player.isMuted = true
+                player.replaceCurrentItem(with: item)
+                player.play()
+                self.player = player
+                await monitor(item, on: player)
+            } catch {
+                player?.replaceCurrentItem(with: nil)
+                player = nil
+                status = "NO SIGNAL"
+            }
+            // Back off briefly, then request a fresh stream session.
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+        }
+    }
+
+    /// Returns when the item fails or playback freezes (~20s with no time
+    /// advancing) — either way the caller re-requests a fresh stream URL.
+    private func monitor(_ item: AVPlayerItem, on player: AVPlayer) async {
+        var lastTime = CMTime.invalid
+        var stagnantTicks = 0
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            if item.status == .failed { return }
+            let time = item.currentTime()
+            if time == lastTime {
+                stagnantTicks += 1
+                if stagnantTicks >= 5 { return }
+            } else {
+                stagnantTicks = 0
+                lastTime = time
+            }
+            _ = player // keep a strong reference alive for the loop's duration
+        }
+    }
+}
+
+/// Classic CCTV "REC" indicator, blinking once a second.
+private struct RecordingDot: View {
+    let size: CGFloat
+    let fontSize: CGFloat
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let on = Int(context.date.timeIntervalSince1970) % 2 == 0
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(Color.red)
+                    .frame(width: size, height: size)
+                    .opacity(on ? 1 : 0.15)
+                Text("REC")
+                    .font(Theme.mono(fontSize, weight: .medium))
+                    .foregroundColor(.white.opacity(0.9))
+                    .shadow(color: .black, radius: 0, x: 1, y: 1)
+            }
+        }
+    }
+}
+
+/// Burned-in date/time stamp, security-footage style.
+private struct TimestampView: View {
+    let fontSize: CGFloat
+
+    private static let formatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM-dd-yyyy  HH:mm:ss"
+        return formatter
+    }()
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            Text(Self.formatter.string(from: context.date))
+                .font(Theme.mono(fontSize, weight: .medium))
+                .foregroundColor(.white.opacity(0.9))
+                .shadow(color: .black, radius: 0, x: 1, y: 1)
+        }
+    }
+}

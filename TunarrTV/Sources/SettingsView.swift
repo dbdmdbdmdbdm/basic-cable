@@ -13,6 +13,7 @@ struct SettingsView: View {
     @State private var haURLText = ""
     @State private var haTokenText = ""
     @State private var haSensorsText = ""
+    @State private var haCamerasText = ""
     @State private var dashURLText = ""
     @State private var immichURLText = ""
     @State private var immichKeyText = ""
@@ -89,6 +90,29 @@ struct SettingsView: View {
                     field("HA SENSOR ENTITIES (COMMA-SEPARATED)",
                           placeholder: "sensor.outdoor_temp, sensor.pool_temp", text: $haSensorsText)
 
+                    sectionHeader("SECURITY CAMERAS CHANNEL (OPTIONAL)")
+                    field("HA CAMERA ENTITIES (COMMA-SEPARATED)",
+                          placeholder: "camera.front_door, camera.backyard", text: $haCamerasText)
+                    Text("Shows all cameras live in one grid as channel \(CamerasChannel.number). Uses the Home Assistant URL and token above — streams come straight from HA, full motion.")
+                        .font(.system(size: 17 * uiScale))
+                        .foregroundColor(Theme.dimText)
+                        .frame(maxWidth: 1000, alignment: .leading)
+                    if !state.cameraEntityIds.isEmpty {
+                        VStack(spacing: 10) {
+                            ForEach(state.cameraEntityIds, id: \.self) { entityId in
+                                Toggle(isOn: cameraVisibilityBinding(entityId)) {
+                                    Text("SHOW \(CameraName.display(entityId))")
+                                        .font(Theme.mono(20 * uiScale, weight: .medium))
+                                }
+                            }
+                        }
+                        .frame(maxWidth: 1000)
+                        Text("Toggles apply immediately — hidden cameras stay in the list above.")
+                            .font(.system(size: 17 * uiScale))
+                            .foregroundColor(Theme.dimText)
+                            .frame(maxWidth: 1000, alignment: .leading)
+                    }
+
                     sectionHeader("HOME DASHBOARD CHANNEL (OPTIONAL)")
                     field("SNAPSHOT URL FROM THE HA-SCREENCAP COMPANION",
                           placeholder: "http://192.168.1.100:8090/latest.png", text: $dashURLText)
@@ -152,6 +176,7 @@ struct SettingsView: View {
             haURLText = state.haURLString
             haTokenText = state.haToken
             haSensorsText = state.haSensorEntities
+            haCamerasText = state.haCameraEntities
             dashURLText = state.dashImageURLString
             immichURLText = state.immichURLString
             immichKeyText = state.immichAPIKey
@@ -234,6 +259,7 @@ struct SettingsView: View {
         state.haURLString = haURLText.trimmingCharacters(in: .whitespacesAndNewlines)
         state.haToken = haTokenText.trimmingCharacters(in: .whitespacesAndNewlines)
         state.haSensorEntities = haSensorsText.trimmingCharacters(in: .whitespacesAndNewlines)
+        state.haCameraEntities = haCamerasText.trimmingCharacters(in: .whitespacesAndNewlines)
         state.dashImageURLString = dashURLText.trimmingCharacters(in: .whitespacesAndNewlines)
         state.immichURLString = immichURLText.trimmingCharacters(in: .whitespacesAndNewlines)
         state.immichAPIKey = immichKeyText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -242,6 +268,21 @@ struct SettingsView: View {
             await state.reload()
             await state.refreshWeather(force: true)
         }
+    }
+
+    /// Show/hide state for one camera in the grid. Applied immediately
+    /// (like the iCloud toggle) rather than on SAVE.
+    private func cameraVisibilityBinding(_ entityId: String) -> Binding<Bool> {
+        Binding(
+            get: { !state.hiddenCameraIds.contains(entityId) },
+            set: { show in
+                if show {
+                    state.hiddenCameraIds.remove(entityId)
+                } else {
+                    state.hiddenCameraIds.insert(entityId)
+                }
+            }
+        )
     }
 
     private func sectionHeader(_ title: String) -> some View {

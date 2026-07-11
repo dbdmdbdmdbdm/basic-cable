@@ -11,10 +11,12 @@ final class AppState: ObservableObject {
     static let weatherChannelId = WeatherChannel.id
     static let dashboardChannelId = HADashboardChannel.id
     static let photosChannelId = PhotosChannel.id
+    static let camerasChannelId = CamerasChannel.id
 
     /// Client-rendered channels — no Tunarr stream behind them.
     static func isSyntheticChannel(_ id: String) -> Bool {
         id == weatherChannelId || id == dashboardChannelId || id == photosChannelId
+            || id == camerasChannelId
     }
 
     @Published var serverURLString: String {
@@ -31,6 +33,14 @@ final class AppState: ObservableObject {
     }
     @Published var haSensorEntities: String {
         didSet { persist(haSensorEntities, forKey: "haSensorEntities") }
+    }
+    @Published var haCameraEntities: String {
+        didSet { persist(haCameraEntities, forKey: "haCameraEntities") }
+    }
+    /// Cameras toggled off in settings — hidden from the grid without
+    /// losing their place in the configured list.
+    @Published var hiddenCameraIds: Set<String> {
+        didSet { persist(hiddenCameraIds.sorted().joined(separator: ","), forKey: "hiddenCameras") }
     }
     @Published var dashImageURLString: String {
         didSet { persist(dashImageURLString, forKey: "dashImageURL") }
@@ -95,12 +105,26 @@ final class AppState: ObservableObject {
     var isWeatherTuned: Bool { tunedChannel?.id == Self.weatherChannelId }
     var isDashboardTuned: Bool { tunedChannel?.id == Self.dashboardChannelId }
     var isPhotosTuned: Bool { tunedChannel?.id == Self.photosChannelId }
+    var isCamerasTuned: Bool { tunedChannel?.id == Self.camerasChannelId }
     var isSyntheticTuned: Bool {
         guard let id = tunedChannel?.id else { return false }
         return Self.isSyntheticChannel(id)
     }
 
     var haClient: HAClient? { HAClient(urlString: haURLString, token: haToken) }
+
+    /// Camera entities configured for the security channel, in list order.
+    var cameraEntityIds: [String] {
+        haCameraEntities
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
+    /// The cameras actually shown in the grid (configured minus hidden).
+    var visibleCameraIds: [String] {
+        cameraEntityIds.filter { !hiddenCameraIds.contains($0) }
+    }
 
     var immichClient: ImmichClient? { ImmichClient(urlString: immichURLString, apiKey: immichAPIKey) }
 
@@ -130,6 +154,13 @@ final class AppState: ObservableObject {
         haURLString = setting("haURL")
         haToken = setting("haToken")
         haSensorEntities = setting("haSensorEntities")
+        haCameraEntities = setting("haCameraEntities")
+        hiddenCameraIds = Set(
+            setting("hiddenCameras")
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+        )
         dashImageURLString = setting("dashImageURL")
         immichURLString = setting("immichURL")
         immichAPIKey = setting("immichKey")
@@ -174,6 +205,8 @@ final class AppState: ObservableObject {
         persist(haURLString, forKey: "haURL")
         persist(haToken, forKey: "haToken")
         persist(haSensorEntities, forKey: "haSensorEntities")
+        persist(haCameraEntities, forKey: "haCameraEntities")
+        persist(hiddenCameraIds.sorted().joined(separator: ","), forKey: "hiddenCameras")
         persist(dashImageURLString, forKey: "dashImageURL")
         persist(immichURLString, forKey: "immichURL")
         persist(immichAPIKey, forKey: "immichKey")
@@ -205,6 +238,14 @@ final class AppState: ObservableObject {
             case "haSensorEntities" where value != haSensorEntities:
                 haSensorEntities = value
                 weatherChanged = true
+            case "haCameraEntities" where value != haCameraEntities:
+                haCameraEntities = value
+                lineupChanged = true
+            case "hiddenCameras":
+                let ids = Set(value.split(separator: ",")
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty })
+                if ids != hiddenCameraIds { hiddenCameraIds = ids }
             case "dashImageURL" where value != dashImageURLString:
                 dashImageURLString = value
                 lineupChanged = true
@@ -423,6 +464,15 @@ final class AppState: ObservableObject {
     /// configured in settings. Each is one continuous all-day guide block.
     private func syntheticChannels(from: Date, to: Date) -> [(Channel, [GuideEntry])] {
         var lineup: [(Channel, [GuideEntry])] = []
+        if haClient != nil, !cameraEntityIds.isEmpty {
+            let channel = Channel(id: Self.camerasChannelId, name: "Security",
+                                  number: CamerasChannel.number, icon: nil, groupTitle: nil)
+            lineup.append((channel, [Self.allDayEntry(
+                id: "cams-full", channelId: channel.id, from: from, to: to,
+                kind: .cameras, title: "SECURITY CAMERAS",
+                summary: "A live multi-camera wall, streamed straight from your Home Assistant cameras."
+            )]))
+        }
         if immichClient != nil {
             let channel = Channel(id: Self.photosChannelId, name: "Photos",
                                   number: PhotosChannel.number, icon: nil, groupTitle: nil)

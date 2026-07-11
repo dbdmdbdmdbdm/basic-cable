@@ -20,6 +20,13 @@ enum PhotosChannel {
     static let number = 997
 }
 
+/// Synthetic channel showing a live multi-camera grid, streamed straight
+/// from Home Assistant's camera entities over HLS.
+enum CamerasChannel {
+    static let id = "cameras-local"
+    static let number = 951
+}
+
 struct Channel: Identifiable, Decodable, Hashable {
     let id: String
     let name: String
@@ -65,6 +72,7 @@ struct GuideEntry: Identifiable, Hashable {
         case weather
         case haDashboard
         case photos
+        case cameras
         case other
     }
 
@@ -72,7 +80,7 @@ struct GuideEntry: Identifiable, Hashable {
 
     /// Client-rendered channels: always-on, no video stream, no progress bar.
     var isSynthetic: Bool {
-        kind == .weather || kind == .haDashboard || kind == .photos
+        kind == .weather || kind == .haDashboard || kind == .photos || kind == .cameras
     }
 
     func airs(at date: Date) -> Bool {

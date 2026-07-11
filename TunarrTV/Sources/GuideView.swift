@@ -237,6 +237,7 @@ struct GuideCellView: View {
         if entry.kind == .weather { return Theme.cellWeather }
         if entry.kind == .haDashboard { return Theme.cellDashboard }
         if entry.kind == .photos { return Theme.cellPhotos }
+        if entry.kind == .cameras { return Theme.cellCameras }
         if entry.isFlex { return Theme.cellFlex }
         return shade
     }
@@ -322,6 +323,10 @@ struct ChannelLogoView: View {
                 Image(systemName: "photo.on.rectangle.angled")
                     .font(.system(size: size * 0.55))
                     .foregroundColor(.orange)
+            } else if channel.id == CamerasChannel.id {
+                Image(systemName: "video.fill")
+                    .font(.system(size: size * 0.55))
+                    .foregroundColor(Color(red: 0.92, green: 0.35, blue: 0.30))
             } else if let path = channel.icon?.path, !path.isEmpty, let url = URL(string: path) {
                 AsyncImage(url: url) { image in
                     image.resizable().scaledToFit()
