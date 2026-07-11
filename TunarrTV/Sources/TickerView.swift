@@ -39,6 +39,22 @@ struct ChannelTickerView: View {
                     .font(Theme.mono(textSize, weight: .medium))
                     .foregroundColor(.white)
                     .lineLimit(1)
+                // Where it's playing: one named speaker, or a group icon
+                // with the count when several carry the same stream.
+                if item.players.count > 1 {
+                    HStack(spacing: 4) {
+                        Image(systemName: "hifispeaker.2.fill")
+                            .font(.system(size: textSize * 0.75))
+                        Text("\(item.players.count)")
+                            .font(Theme.mono(textSize * 0.85, weight: .medium))
+                    }
+                    .foregroundColor(Theme.dimText)
+                } else if let player = item.players.first {
+                    Text("· \(player.uppercased())")
+                        .font(Theme.mono(textSize * 0.85, weight: .medium))
+                        .foregroundColor(Theme.dimText)
+                        .lineLimit(1)
+                }
                 if nowPlaying.count > 1 {
                     Text("\(rotationIndex % nowPlaying.count + 1)/\(nowPlaying.count)")
                         .font(Theme.mono(textSize * 0.75, weight: .medium))

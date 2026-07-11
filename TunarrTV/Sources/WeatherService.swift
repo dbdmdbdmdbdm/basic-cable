@@ -234,13 +234,16 @@ struct HAClient {
     }
 
     struct NowPlayingItem: Hashable {
-        let player: String
         let title: String
         let artist: String?
+        /// Every player carrying this same stream — grouped speakers show
+        /// as one entry with a count, not one entry per room.
+        let players: [String]
     }
 
-    /// What the given media players are playing right now. Players playing
-    /// the same thing (grouped speakers) collapse to one item.
+    /// What the given media players are playing right now, consolidated:
+    /// players on the same title+artist collapse into one item that lists
+    /// all of them.
     func fetchNowPlaying(_ entityIds: [String]) async -> [NowPlayingItem] {
         struct EntityState: Decodable {
             let state: String
@@ -251,18 +254,22 @@ struct HAClient {
                 let media_artist: String?
             }
         }
-        var items: [NowPlayingItem] = []
+        var groups: [(key: String, title: String, artist: String?, players: [String])] = []
         for entityId in entityIds {
             guard let (data, response) = try? await URLSession.shared.data(for: request(path: "api/states/\(entityId)")),
                   (response as? HTTPURLResponse)?.statusCode == 200,
                   let entity = try? JSONDecoder().decode(EntityState.self, from: data),
                   entity.state == "playing",
                   let title = entity.attributes.media_title, !title.isEmpty else { continue }
-            items.append(NowPlayingItem(player: entity.attributes.friendly_name ?? entityId,
-                                        title: title, artist: entity.attributes.media_artist))
+            let player = entity.attributes.friendly_name ?? entityId
+            let key = "\(title)|\(entity.attributes.media_artist ?? "")"
+            if let index = groups.firstIndex(where: { $0.key == key }) {
+                groups[index].players.append(player)
+            } else {
+                groups.append((key, title, entity.attributes.media_artist, [player]))
+            }
         }
-        var seen = Set<String>()
-        return items.filter { seen.insert("\($0.title)|\($0.artist ?? "")").inserted }
+        return groups.map { NowPlayingItem(title: $0.title, artist: $0.artist, players: $0.players) }
     }
 
     func entityExists(_ entityId: String) async -> Bool {
