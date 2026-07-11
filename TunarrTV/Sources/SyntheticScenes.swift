@@ -20,6 +20,30 @@ struct SyntheticChannelView: View {
     }
 }
 
+/// Corner badge with current conditions, togglable onto the photos and
+/// cameras channels. Hidden until a forecast has loaded.
+struct WeatherOverlayBadge: View {
+    @EnvironmentObject var state: AppState
+    var compact = false
+
+    var body: some View {
+        if let current = state.weatherData.current {
+            HStack(spacing: compact ? 5 : 10) {
+                Image(systemName: WMO.symbol(current.code))
+                    .symbolRenderingMode(.multicolor)
+                Text("\(Int(current.temperature.rounded()))° \(WMO.description(current.code))")
+            }
+            .font(Theme.mono(compact ? 11 : 22, weight: .medium))
+            .foregroundColor(.white.opacity(0.92))
+            .padding(.horizontal, compact ? 8 : 16)
+            .padding(.vertical, compact ? 4 : 9)
+            .background(Color.black.opacity(0.55))
+            .cornerRadius(6)
+            .padding(compact ? 8 : 28)
+        }
+    }
+}
+
 // MARK: - HA Dashboard channel
 
 /// Shows the latest snapshot from an ha-screencap companion server (a small
@@ -109,14 +133,20 @@ struct DashboardSceneView: View {
 
 // MARK: - Photos channel
 
-/// Slideshow of Immich favorites: shuffled, crossfaded, with a slow
-/// Ken Burns drift and a retro date stamp.
+/// Slideshow of Immich favorites: crossfaded, with a slow Ken Burns drift
+/// and a retro date stamp. Rotation is a seasonal weighted shuffle (photos
+/// from this time of year in past years surface more often), and two
+/// portraits share the screen side by side instead of pillarboxing one.
 struct PhotoSceneView: View {
     @EnvironmentObject var state: AppState
     var compact = false
 
-    @State private var current: UIImage?
-    @State private var currentDate: String?
+    struct Pane: Equatable {
+        let image: UIImage
+        let date: String?
+    }
+
+    @State private var panes: [Pane] = []
     @State private var slideIndex = 0
     @State private var status = "LOADING FAVORITES..."
 
@@ -126,12 +156,30 @@ struct PhotoSceneView: View {
         GeometryReader { geo in
             ZStack {
                 Color.black
-                if let current {
-                    KenBurnsImage(image: current, zoomIn: slideIndex.isMultiple(of: 2))
-                        .frame(width: geo.size.width, height: geo.size.height)
-                        .clipped()
-                        .id(slideIndex)
-                        .transition(.opacity)
+                if !panes.isEmpty {
+                    HStack(spacing: panes.count > 1 ? 4 : 0) {
+                        ForEach(Array(panes.enumerated()), id: \.offset) { index, pane in
+                            ZStack(alignment: .bottomLeading) {
+                                KenBurnsImage(image: pane.image,
+                                              zoomIn: (slideIndex + index).isMultiple(of: 2))
+                                    .frame(width: (geo.size.width - CGFloat(panes.count > 1 ? 4 : 0)) / CGFloat(panes.count),
+                                           height: geo.size.height)
+                                    .clipped()
+                                if let date = pane.date, !compact {
+                                    Text(date)
+                                        .font(Theme.mono(20, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.85))
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 8)
+                                        .background(Color.black.opacity(0.45))
+                                        .cornerRadius(6)
+                                        .padding(28)
+                                }
+                            }
+                        }
+                    }
+                    .id(slideIndex)
+                    .transition(.opacity)
                 } else {
                     VStack(spacing: 14) {
                         Image(systemName: "photo.on.rectangle.angled")
@@ -144,20 +192,13 @@ struct PhotoSceneView: View {
                             .padding(.horizontal, 40)
                     }
                 }
-                if let currentDate, current != nil, !compact {
+                if state.weatherOverlayOnPhotos, !panes.isEmpty {
                     VStack {
                         Spacer()
                         HStack {
-                            Text(currentDate)
-                                .font(Theme.mono(20, weight: .medium))
-                                .foregroundColor(.white.opacity(0.85))
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 8)
-                                .background(Color.black.opacity(0.45))
-                                .cornerRadius(6)
                             Spacer()
+                            WeatherOverlayBadge(compact: compact)
                         }
-                        .padding(28)
                     }
                 }
             }
@@ -173,7 +214,7 @@ struct PhotoSceneView: View {
         }
         var assets: [ImmichAsset]
         do {
-            assets = try await client.fetchFavorites().shuffled()
+            assets = try await client.fetchFavorites()
         } catch {
             status = "CAN'T REACH IMMICH\nCHECK THE URL AND API KEY IN SETTINGS"
             return
@@ -182,19 +223,37 @@ struct PhotoSceneView: View {
             status = "NO FAVORITES IN IMMICH YET"
             return
         }
-        var index = 0
-        while !Task.isCancelled {
-            let asset = assets[index % assets.count]
-            index += 1
-            // Reshuffle each full pass so long sessions don't loop verbatim.
-            if index % assets.count == 0 { assets.shuffle() }
+
+        func download(_ asset: ImmichAsset) async -> Pane? {
             guard let (data, response) = try? await URLSession.shared.data(for: client.imageRequest(for: asset)),
                   (response as? HTTPURLResponse)?.statusCode == 200,
-                  let image = UIImage(data: data) else {
-                continue // deleted/broken asset — move on immediately
+                  let image = UIImage(data: data) else { return nil }
+            return Pane(image: image, date: asset.displayDate)
+        }
+
+        var queue: [ImmichAsset] = []
+        while !Task.isCancelled {
+            // Refill with a fresh weighted shuffle each pass so long
+            // sessions don't loop verbatim.
+            if queue.isEmpty { queue = ImmichAsset.seasonalShuffle(assets) }
+            let asset = queue.removeFirst()
+
+            // A portrait brings the next portrait in the queue along so
+            // the pair fills the screen together.
+            var picked = [asset]
+            if asset.isPortrait, let mate = queue.firstIndex(where: { $0.isPortrait }) {
+                picked.append(queue.remove(at: mate))
             }
-            current = image
-            currentDate = asset.displayDate
+
+            // Deleted/broken assets drop out; a surviving solo portrait
+            // still shows by itself.
+            var next: [Pane] = []
+            for candidate in picked {
+                if let pane = await download(candidate) { next.append(pane) }
+            }
+            guard !next.isEmpty else { continue }
+
+            panes = next
             slideIndex += 1
             try? await Task.sleep(nanoseconds: Self.secondsPerPhoto * 1_000_000_000)
         }

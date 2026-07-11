@@ -52,6 +52,15 @@ final class AppState: ObservableObject {
     @Published var immichAPIKey: String {
         didSet { persist(immichAPIKey, forKey: "immichKey") }
     }
+    /// Current-conditions badge over the photos / cameras channels.
+    /// Persisted as "true"/"false" strings to ride the same sync plumbing
+    /// as the text settings.
+    @Published var weatherOverlayOnPhotos: Bool {
+        didSet { persist(weatherOverlayOnPhotos ? "true" : "false", forKey: "weatherOverlayPhotos") }
+    }
+    @Published var weatherOverlayOnCameras: Bool {
+        didSet { persist(weatherOverlayOnCameras ? "true" : "false", forKey: "weatherOverlayCameras") }
+    }
     /// Mirror settings through iCloud key-value storage so configuring the
     /// iPhone app configures the Apple TV app (and vice versa).
     @Published var iCloudSyncEnabled: Bool {
@@ -165,6 +174,8 @@ final class AppState: ObservableObject {
         dashImageURLString = setting("dashImageURL")
         immichURLString = setting("immichURL")
         immichAPIKey = setting("immichKey")
+        weatherOverlayOnPhotos = setting("weatherOverlayPhotos") == "true"
+        weatherOverlayOnCameras = setting("weatherOverlayCameras") == "true"
         windowStart = Self.floorToQuarterHour(Date())
 
         NotificationCenter.default.addObserver(
@@ -211,6 +222,8 @@ final class AppState: ObservableObject {
         persist(dashImageURLString, forKey: "dashImageURL")
         persist(immichURLString, forKey: "immichURL")
         persist(immichAPIKey, forKey: "immichKey")
+        persist(weatherOverlayOnPhotos ? "true" : "false", forKey: "weatherOverlayPhotos")
+        persist(weatherOverlayOnCameras ? "true" : "false", forKey: "weatherOverlayCameras")
     }
 
     /// Applies settings changed on another device. Local edits re-persist
@@ -256,6 +269,10 @@ final class AppState: ObservableObject {
             case "immichKey" where value != immichAPIKey:
                 immichAPIKey = value
                 lineupChanged = true
+            case "weatherOverlayPhotos":
+                weatherOverlayOnPhotos = value == "true"
+            case "weatherOverlayCameras":
+                weatherOverlayOnCameras = value == "true"
             default:
                 break
             }
@@ -573,7 +590,9 @@ final class AppState: ObservableObject {
             itemFailureWatch = nil
             clearDemoLoop()
             player.replaceCurrentItem(with: nil)
-            if channel.id == Self.weatherChannelId {
+            if channel.id == Self.weatherChannelId
+                || (channel.id == Self.photosChannelId && weatherOverlayOnPhotos)
+                || (channel.id == Self.camerasChannelId && weatherOverlayOnCameras) {
                 Task { await refreshWeather() }
             }
             return

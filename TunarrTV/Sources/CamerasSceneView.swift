@@ -99,6 +99,15 @@ struct CamerasSceneView: View {
                 } else {
                     grid(cameras, in: geo.size)
                 }
+                if state.weatherOverlayOnCameras, !cameras.isEmpty {
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Spacer()
+                            WeatherOverlayBadge(compact: compact)
+                        }
+                    }
+                }
             }
         }
     }
@@ -215,10 +224,13 @@ private struct CameraTileView: View {
                     haURLString: ha.baseURL.absoluteString, token: ha.token, entityId: entityId)
                 guard !Task.isCancelled else { return }
                 let item = AVPlayerItem(url: url)
+                // Join fast: don't wait for a deep buffer before first frame
+                // (matches tune() — HA serves LL-HLS, so this is seconds).
+                item.preferredForwardBufferDuration = 2
                 let player = self.player ?? AVPlayer()
                 player.isMuted = true
                 player.replaceCurrentItem(with: item)
-                player.play()
+                player.playImmediately(atRate: 1.0)
                 self.player = player
                 await monitor(item, on: player)
             } catch {

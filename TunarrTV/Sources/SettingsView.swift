@@ -107,6 +107,11 @@ struct SettingsView: View {
                         await state.testCameras(urlString: haURLText, token: haTokenText,
                                                 cameraEntities: haCamerasText)
                     }
+                    Toggle(isOn: $state.weatherOverlayOnCameras) {
+                        Text("SHOW WEATHER OVERLAY")
+                            .font(Theme.mono(20 * uiScale, weight: .medium))
+                    }
+                    .frame(maxWidth: 1000)
                     if !state.cameraEntityIds.isEmpty {
                         VStack(spacing: 10) {
                             ForEach(state.cameraEntityIds, id: \.self) { entityId in
@@ -146,6 +151,11 @@ struct SettingsView: View {
                     testControl("photos") {
                         await state.testImmich(urlString: immichURLText, apiKey: immichKeyText)
                     }
+                    Toggle(isOn: $state.weatherOverlayOnPhotos) {
+                        Text("SHOW WEATHER OVERLAY")
+                            .font(Theme.mono(20 * uiScale, weight: .medium))
+                    }
+                    .frame(maxWidth: 1000)
 
                     sectionHeader("SYNC")
                     Toggle(isOn: $state.iCloudSyncEnabled) {
