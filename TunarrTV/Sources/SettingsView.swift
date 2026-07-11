@@ -24,8 +24,10 @@ struct SettingsView: View {
     @State private var locating = false
     @State private var locationStatus: String?
 
+    @State private var mediaPlayersText = ""
     @State private var sensorSuggestions: [AppState.SuggestedEntity] = []
     @State private var cameraSuggestions: [AppState.SuggestedEntity] = []
+    @State private var mediaPlayerSuggestions: [AppState.SuggestedEntity] = []
     @State private var suggesting: Set<String> = []
 
     @State private var albums: [ImmichAlbum] = []
@@ -58,6 +60,7 @@ struct SettingsView: View {
             || trimmed(dashURLText) != state.dashImageURLString
             || trimmed(immichURLText) != state.immichURLString
             || trimmed(immichKeyText) != state.immichAPIKey
+            || trimmed(mediaPlayersText) != state.mediaPlayerEntities
     }
 
     var body: some View {
@@ -108,6 +111,7 @@ struct SettingsView: View {
                     camerasSection
                     dashboardSection
                     photosSection
+                    tickerSection
                     syncSection
                 }
 
@@ -131,6 +135,7 @@ struct SettingsView: View {
             dashURLText = state.dashImageURLString
             immichURLText = state.immichURLString
             immichKeyText = state.immichAPIKey
+            mediaPlayersText = state.mediaPlayerEntities
         }
     }
 
@@ -236,6 +241,18 @@ struct SettingsView: View {
                 Text("SHOW WEATHER OVERLAY")
                     .font(Theme.mono(20 * uiScale, weight: .medium))
             }
+        }
+    }
+
+    private var tickerSection: some View {
+        section("NOW PLAYING TICKER (OPTIONAL)", tint: Color(white: 0.55)) {
+            field("HA MEDIA PLAYER ENTITIES (COMMA-SEPARATED)",
+                  placeholder: "media_player.living_room, media_player.kitchen", text: $mediaPlayersText)
+            caption("A news-style black bar along the bottom of any channel: what's playing on these media players on the left (speakers playing the same thing collapse to one), weather and clock on the right. Turn it on per channel while watching — press LEFT or RIGHT on the remote (the ticker button on iPhone). Uses the Home Assistant URL and token above.")
+            suggestionControl("mediaplayers", suggestions: mediaPlayerSuggestions, listText: $mediaPlayersText,
+                              buttonTitle: "SUGGEST MEDIA PLAYERS") {
+                await state.suggestMediaPlayers(urlString: haURLText, token: haTokenText)
+            } assign: { mediaPlayerSuggestions = $0 }
         }
     }
 
@@ -531,6 +548,7 @@ struct SettingsView: View {
         state.dashImageURLString = dashURLText.trimmingCharacters(in: .whitespacesAndNewlines)
         state.immichURLString = immichURLText.trimmingCharacters(in: .whitespacesAndNewlines)
         state.immichAPIKey = immichKeyText.trimmingCharacters(in: .whitespacesAndNewlines)
+        state.mediaPlayerEntities = mediaPlayersText.trimmingCharacters(in: .whitespacesAndNewlines)
         state.showSettings = false
         Task {
             await state.reload()

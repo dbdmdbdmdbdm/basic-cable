@@ -233,6 +233,38 @@ struct HAClient {
         }
     }
 
+    struct NowPlayingItem: Hashable {
+        let player: String
+        let title: String
+        let artist: String?
+    }
+
+    /// What the given media players are playing right now. Players playing
+    /// the same thing (grouped speakers) collapse to one item.
+    func fetchNowPlaying(_ entityIds: [String]) async -> [NowPlayingItem] {
+        struct EntityState: Decodable {
+            let state: String
+            let attributes: Attributes
+            struct Attributes: Decodable {
+                let friendly_name: String?
+                let media_title: String?
+                let media_artist: String?
+            }
+        }
+        var items: [NowPlayingItem] = []
+        for entityId in entityIds {
+            guard let (data, response) = try? await URLSession.shared.data(for: request(path: "api/states/\(entityId)")),
+                  (response as? HTTPURLResponse)?.statusCode == 200,
+                  let entity = try? JSONDecoder().decode(EntityState.self, from: data),
+                  entity.state == "playing",
+                  let title = entity.attributes.media_title, !title.isEmpty else { continue }
+            items.append(NowPlayingItem(player: entity.attributes.friendly_name ?? entityId,
+                                        title: title, artist: entity.attributes.media_artist))
+        }
+        var seen = Set<String>()
+        return items.filter { seen.insert("\($0.title)|\($0.artist ?? "")").inserted }
+    }
+
     func entityExists(_ entityId: String) async -> Bool {
         guard let (_, response) = try? await URLSession.shared.data(for: request(path: "api/states/\(entityId)")) else {
             return false

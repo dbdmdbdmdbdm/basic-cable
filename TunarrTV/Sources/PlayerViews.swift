@@ -32,8 +32,10 @@ struct PlayerLayerView: UIViewRepresentable {
 struct FullscreenPlayerView: View {
     @EnvironmentObject var state: AppState
     @FocusState private var focused: Bool
+    @FocusState private var panelFocused: Bool
     @State private var bannerVisible = true
     @State private var bannerTask: Task<Void, Never>?
+    @State private var showQuickPanel = false
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -51,16 +53,31 @@ struct FullscreenPlayerView: View {
                 }
             }
 
+            if let channel = state.tunedChannel, state.isTickerEnabled(channel.id) {
+                VStack {
+                    Spacer()
+                    ChannelTickerView()
+                }
+                .ignoresSafeArea()
+            }
+
             if bannerVisible, let channel = state.tunedChannel {
                 banner(for: channel)
                     .padding(48)
                     .transition(.opacity)
             }
+
+            if showQuickPanel, let channel = state.tunedChannel {
+                quickPanel(for: channel)
+            }
         }
         .focusable(true)
         .focused($focused)
         // Select press returns to the guide (Menu via onExitCommand does too).
-        .onTapGesture { state.isFullscreen = false }
+        .onTapGesture {
+            guard !showQuickPanel else { return }
+            state.isFullscreen = false
+        }
         .onPlayPauseCommand { state.togglePause() }
         .onMoveCommand { direction in
             switch direction {
@@ -70,11 +87,21 @@ struct FullscreenPlayerView: View {
             case .down:
                 state.channelDown()
                 showBanner()
-            default:
+            case .left, .right:
+                // Quick options for the tuned channel (up/down keep zapping).
+                showQuickPanel = true
+                panelFocused = true
+            @unknown default:
                 break
             }
         }
-        .onExitCommand { state.isFullscreen = false }
+        .onExitCommand {
+            if showQuickPanel {
+                closeQuickPanel()
+            } else {
+                state.isFullscreen = false
+            }
+        }
         .onAppear {
             focused = true
             showBanner()
@@ -83,13 +110,61 @@ struct FullscreenPlayerView: View {
         // Channel changes rebuild parts of the tree and can drop focus,
         // which would strand the Menu/exit command — re-assert it.
         .onChange(of: state.tunedChannel) { _, _ in
-            focused = true
+            if !showQuickPanel { focused = true }
         }
         .onChange(of: focused) { _, isFocused in
-            if !isFocused && state.isFullscreen {
+            if !isFocused && state.isFullscreen && !showQuickPanel {
                 focused = true
             }
         }
+    }
+
+    // MARK: - Quick options panel
+
+    private func quickPanel(for channel: Channel) -> some View {
+        VStack {
+            Spacer()
+            VStack(alignment: .leading, spacing: 18) {
+                Text("CH \(channel.number) · \(channel.name.uppercased())")
+                    .font(Theme.mono(22))
+                    .foregroundColor(Theme.dimText)
+                Toggle(isOn: tickerBinding(channel.id)) {
+                    Text("BOTTOM TICKER ON THIS CHANNEL")
+                        .font(Theme.mono(24, weight: .medium))
+                }
+                .focused($panelFocused)
+                Text("NOW PLAYING FROM YOUR MEDIA PLAYERS + WEATHER · SET PLAYERS IN SETTINGS · MENU TO CLOSE")
+                    .font(Theme.mono(15, weight: .medium))
+                    .foregroundColor(Theme.dimText)
+            }
+            .padding(36)
+            .frame(maxWidth: 900)
+            .background(Color.black.opacity(0.92))
+            .cornerRadius(12)
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(white: 0.3), lineWidth: 2))
+            .padding(.bottom, 120)
+        }
+        .frame(maxWidth: .infinity)
+        .transition(.opacity)
+    }
+
+    private func closeQuickPanel() {
+        showQuickPanel = false
+        focused = true
+    }
+
+    private func tickerBinding(_ channelId: String) -> Binding<Bool> {
+        Binding(
+            get: { state.tickerChannelIds.contains(channelId) },
+            set: { on in
+                if on {
+                    state.tickerChannelIds.insert(channelId)
+                    Task { await state.refreshWeather() }
+                } else {
+                    state.tickerChannelIds.remove(channelId)
+                }
+            }
+        )
     }
 
     private func banner(for channel: Channel) -> some View {

@@ -52,6 +52,14 @@ final class AppState: ObservableObject {
     @Published var immichAPIKey: String {
         didSet { persist(immichAPIKey, forKey: "immichKey") }
     }
+    /// Media players feeding the ticker's now-playing side.
+    @Published var mediaPlayerEntities: String {
+        didSet { persist(mediaPlayerEntities, forKey: "mediaPlayerEntities") }
+    }
+    /// Channels with the bottom ticker turned on (toggled from the player).
+    @Published var tickerChannelIds: Set<String> {
+        didSet { persist(tickerChannelIds.sorted().joined(separator: ","), forKey: "tickerChannels") }
+    }
     /// Album feeding the photos channel; empty = favorites (the default).
     @Published var immichAlbumId: String {
         didSet { persist(immichAlbumId, forKey: "immichAlbumId") }
@@ -153,6 +161,18 @@ final class AppState: ObservableObject {
         cameraEntityIds.filter { !hiddenCameraIds.contains($0) }
     }
 
+    var mediaPlayerIds: [String] { Self.parseEntityList(mediaPlayerEntities) }
+
+    func isTickerEnabled(_ channelId: String) -> Bool {
+        tickerChannelIds.contains(channelId)
+    }
+
+    /// Now-playing across the configured media players, deduped.
+    func fetchNowPlaying() async -> [HAClient.NowPlayingItem] {
+        guard let ha = haClient, !mediaPlayerIds.isEmpty else { return [] }
+        return await ha.fetchNowPlaying(mediaPlayerIds)
+    }
+
     var immichClient: ImmichClient? { ImmichClient(urlString: immichURLString, apiKey: immichAPIKey) }
 
     struct DashboardConfig: Equatable {
@@ -238,6 +258,13 @@ final class AppState: ObservableObject {
         immichAPIKey = setting("immichKey")
         immichAlbumId = setting("immichAlbumId")
         immichAlbumName = setting("immichAlbumName")
+        mediaPlayerEntities = setting("mediaPlayerEntities")
+        tickerChannelIds = Set(
+            setting("tickerChannels")
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+        )
         weatherOverlayOnPhotos = setting("weatherOverlayPhotos") == "true"
         weatherOverlayOnCameras = setting("weatherOverlayCameras") == "true"
         windowStart = Self.floorToQuarterHour(Date())
@@ -288,6 +315,8 @@ final class AppState: ObservableObject {
         persist(immichAPIKey, forKey: "immichKey")
         persist(immichAlbumId, forKey: "immichAlbumId")
         persist(immichAlbumName, forKey: "immichAlbumName")
+        persist(mediaPlayerEntities, forKey: "mediaPlayerEntities")
+        persist(tickerChannelIds.sorted().joined(separator: ","), forKey: "tickerChannels")
         persist(weatherOverlayOnPhotos ? "true" : "false", forKey: "weatherOverlayPhotos")
         persist(weatherOverlayOnCameras ? "true" : "false", forKey: "weatherOverlayCameras")
     }
@@ -335,6 +364,13 @@ final class AppState: ObservableObject {
             case "immichKey" where value != immichAPIKey:
                 immichAPIKey = value
                 lineupChanged = true
+            case "mediaPlayerEntities" where value != mediaPlayerEntities:
+                mediaPlayerEntities = value
+            case "tickerChannels":
+                let ids = Set(value.split(separator: ",")
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty })
+                if ids != tickerChannelIds { tickerChannelIds = ids }
             case "immichAlbumId" where value != immichAlbumId:
                 immichAlbumId = value
             case "immichAlbumName" where value != immichAlbumName:
@@ -672,6 +708,10 @@ final class AppState: ObservableObject {
         tunedChannel = channel
         isPaused = false
         UserDefaults.standard.set(channel.id, forKey: "lastChannelId")
+        // The ticker shows weather on any channel it's enabled for.
+        if isTickerEnabled(channel.id) {
+            Task { await refreshWeather() }
+        }
         if Self.isSyntheticChannel(channel.id) {
             itemFailureWatch = nil
             clearDemoLoop()
@@ -1009,6 +1049,21 @@ final class AppState: ObservableObject {
         return ranked.prefix(20).map {
             SuggestedEntity(id: $0.entityId, detail: "\($0.state)\($0.unit ?? "")")
         }
+    }
+
+    /// Media players that exist and are reachable, active ones first.
+    func suggestMediaPlayers(urlString: String, token: String) async -> [SuggestedEntity] {
+        guard let ha = HAClient(urlString: urlString, token: token),
+              let entities = try? await ha.fetchEntitySummaries() else { return [] }
+        return entities
+            .filter { $0.entityId.hasPrefix("media_player.") && !["unavailable", "unknown"].contains($0.state) }
+            .sorted {
+                let left = ($0.state == "playing" ? 0 : 1, $0.entityId)
+                let right = ($1.state == "playing" ? 0 : 1, $1.entityId)
+                return left < right
+            }
+            .prefix(20)
+            .map { SuggestedEntity(id: $0.entityId, detail: $0.state.uppercased()) }
     }
 
     /// Cameras with a live feed (unavailable ones are left out).
