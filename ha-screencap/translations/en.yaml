@@ -8,14 +8,14 @@ configuration:
   dash_paths:
     name: "📸 Capture · Dashboards to capture"
     description: >-
-      One entry per dashboard, using the path from your browser's URL bar
-      (for example /lovelace/0 or /dashboard-family/tv). The first serves
-      at /latest.png, the second at /latest/1.png, and so on.
+      Dashboard paths from your browser's URL bar, comma-separated (for
+      example /lovelace/0, /dashboard-family/tv). The first serves at
+      /latest.png, the second at /latest/1.png, and so on.
   dash_names:
     name: "📸 Capture · Dashboard names"
     description: >-
-      Optional names matching the dashboards above, in the same order
-      (for example Home, Kitchen). With app management enabled below,
+      Optional comma-separated names matching the dashboards above, in
+      the same order (for example Home, Kitchen). With app management enabled below,
       each captured dashboard automatically becomes its own channel in
       the app under this name.
   interval_seconds:
@@ -53,17 +53,19 @@ configuration:
   cameras:
     name: "📺 Basic Cable app · Security cameras channel"
     description: >-
-      Camera entities for the live CCTV wall (channel 951). The order
-      here is the order in the grid — first entry is CAM 1.
+      Camera entities for the live CCTV wall (channel 951), comma-
+      separated. The order here is the order in the grid — first entry
+      is CAM 1.
   weather_sensors:
     name: "📺 Basic Cable app · Weather channel sensors"
     description: >-
-      Sensor entities for the weather channel's "around the house"
-      readings (for example sensor.outdoor_temp, sensor.pool_temp).
+      Comma-separated sensor entities for the weather channel's "around
+      the house" readings (for example sensor.outdoor_temp,
+      sensor.pool_temp).
   media_players:
     name: "📺 Basic Cable app · Ticker now-playing sources"
     description: >-
-      Media players the bottom ticker watches. Players playing the same
+      Comma-separated media players the bottom ticker watches. Players playing the same
       thing (grouped speakers) collapse into one entry with a count; a
       soundbar's generic "TV" title is resolved to what the room's TV is
       actually playing.

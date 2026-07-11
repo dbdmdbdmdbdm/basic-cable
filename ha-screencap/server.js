@@ -43,18 +43,25 @@ try {
   const fs = require('fs');
   const optionsPath = process.env.APP_CONFIG_FILE || '/data/options.json';
   const opts = JSON.parse(fs.readFileSync(optionsPath, 'utf8'));
+  // Options may be YAML lists (older versions) or comma-separated strings
+  // (current schema — renders label-first in the HA config UI).
+  const toList = (value) =>
+    Array.isArray(value)
+      ? value
+      : String(value || '').split(',').map((s) => s.trim()).filter(Boolean);
   if (opts.app_config_enabled) {
+    const dashNames = toList(opts.dash_names);
     appConfig = {
       // The dashboards this add-on captures become the app's dashboard
       // channels: index maps to /latest/<index>.png on this same origin,
       // names come from the parallel dash_names option.
       dashboards: DASH_PATHS.map((path, index) => ({
         index,
-        name: (opts.dash_names || [])[index] || '',
+        name: dashNames[index] || '',
       })),
-      cameras: opts.cameras || [],
-      weather_sensors: opts.weather_sensors || [],
-      media_players: opts.media_players || [],
+      cameras: toList(opts.cameras),
+      weather_sensors: toList(opts.weather_sensors),
+      media_players: toList(opts.media_players),
       ticker: {
         scroll: !!opts.ticker_scroll,
         entities: (opts.ticker_entities || []).map((e) => ({
