@@ -36,6 +36,32 @@ http://<ha-host>:8090/latest.png, Kitchen=http://<ha-host>:8090/latest/1.png
 | `reload_minutes` | Full page reload cadence (single-dashboard mode only) |
 | `ha_url` | How the browser reaches HA — the default `http://homeassistant:8123` works on HA OS |
 
+## Configuring the app from the add-on
+
+Set `app_config_enabled: true` and the add-on serves `/appconfig` — the
+Basic Cable app picks it up automatically (via the snapshot URL you
+already configured) and these lists **override** whatever is typed in
+the app's settings, so everything is managed here in HA:
+
+```yaml
+app_config_enabled: true
+cameras:                       # security channel — list order = grid order
+  - camera.front_door
+  - camera.backyard
+weather_sensors:               # weather channel "around the house" page
+  - sensor.outdoor_temp
+media_players:                 # ticker now-playing sources
+  - media_player.living_room
+ticker_scroll: false           # true = classic news crawl
+ticker_entities:               # extra ticker items, optionally conditional
+  - entity: cover.garage_door
+    name: GARAGE               # defaults to the entity's friendly name
+    show_when: open            # only show while the state matches (omit = always)
+    color: red                 # red orange yellow green mint teal cyan blue purple pink white gray
+    icon: exclamationmark.triangle.fill   # any SF Symbol name
+    display: name_state        # name_state (default) | name | state
+```
+
 ## Notes
 
 - With several dashboards, one browser page cycles through them, so each

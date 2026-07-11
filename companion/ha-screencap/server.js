@@ -34,6 +34,38 @@ const STALE_SECONDS = (INTERVAL + (DASH_PATHS.length - 1) * 15) * 6;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Optional app config: when running as the HA add-on, the add-on options
+// (cameras, weather sensors, media players, ticker) are served at
+// /appconfig so the Basic Cable app can be configured from HA instead of
+// on-device. Plain-docker users can point APP_CONFIG_FILE at a JSON file.
+let appConfig = null;
+try {
+  const fs = require('fs');
+  const optionsPath = process.env.APP_CONFIG_FILE || '/data/options.json';
+  const opts = JSON.parse(fs.readFileSync(optionsPath, 'utf8'));
+  if (opts.app_config_enabled) {
+    appConfig = {
+      cameras: opts.cameras || [],
+      weather_sensors: opts.weather_sensors || [],
+      media_players: opts.media_players || [],
+      ticker: {
+        scroll: !!opts.ticker_scroll,
+        entities: (opts.ticker_entities || []).map((e) => ({
+          entity: e.entity,
+          name: e.name || null,
+          show_when: e.show_when || null,
+          color: e.color || null,
+          icon: e.icon || null,
+          display: e.display || null,
+        })),
+      },
+    };
+    console.log('serving app config at /appconfig');
+  }
+} catch (_) {
+  /* no options file — snapshot-only mode */
+}
+
 async function newPage(browser) {
   const page = await browser.newPage();
   await page.setViewport({ width: WIDTH, height: HEIGHT });
@@ -156,6 +188,16 @@ http
       const ok = dashboards.every((d) => d.ageSeconds !== null && d.ageSeconds < STALE_SECONDS);
       res.writeHead(ok ? 200 : 503, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok, dashboards }));
+      return;
+    }
+    if (req.url.startsWith('/appconfig')) {
+      if (!appConfig) {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('app config not enabled');
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify(appConfig));
       return;
     }
     // /latest.png (first dashboard) or /latest/<index>.png; the bare root
