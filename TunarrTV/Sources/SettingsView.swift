@@ -59,7 +59,7 @@ struct SettingsView: View {
                 }
 
                 if !isFirstRun {
-                    sectionHeader("WEATHER CHANNEL")
+                    sectionHeader("WEATHER CHANNEL — \(WeatherChannel.number)", tint: Theme.cellWeather)
                     field("LOCATION (ZIP, CITY, OR LAT,LON) — USED WITHOUT HOME ASSISTANT",
                           placeholder: "90210  /  Austin, TX  /  37.77, -122.42", text: $locationText)
                     HStack(spacing: 16) {
@@ -96,7 +96,7 @@ struct SettingsView: View {
                                                       sensorEntities: haSensorsText)
                     }
 
-                    sectionHeader("SECURITY CAMERAS CHANNEL (OPTIONAL)")
+                    sectionHeader("SECURITY CAMERAS CHANNEL — \(CamerasChannel.number) (OPTIONAL)", tint: Theme.cellCameras)
                     field("HA CAMERA ENTITIES (COMMA-SEPARATED)",
                           placeholder: "camera.front_door, camera.backyard", text: $haCamerasText)
                     Text("Shows all cameras live in one grid as channel \(CamerasChannel.number). Uses the Home Assistant URL and token above — streams come straight from HA, full motion.")
@@ -128,7 +128,7 @@ struct SettingsView: View {
                             .frame(maxWidth: 1000, alignment: .leading)
                     }
 
-                    sectionHeader("HOME DASHBOARD CHANNEL (OPTIONAL)")
+                    sectionHeader("HOME DASHBOARD CHANNEL — \(HADashboardChannel.number) (OPTIONAL)", tint: Theme.cellDashboard)
                     field("SNAPSHOT URL FROM THE HA-SCREENCAP COMPANION",
                           placeholder: "http://192.168.1.100:8090/latest.png", text: $dashURLText)
                     Text("Shows your Home Assistant dashboard as channel \(HADashboardChannel.number). Needs the ha-screencap container running on your network — see the GitHub README.")
@@ -139,12 +139,12 @@ struct SettingsView: View {
                         await state.testDashboard(urlString: dashURLText)
                     }
 
-                    sectionHeader("PHOTOS CHANNEL (OPTIONAL)")
+                    sectionHeader("PHOTOS CHANNEL — \(PhotosChannel.number) (OPTIONAL)", tint: Theme.cellPhotos)
                     field("IMMICH URL",
                           placeholder: "http://192.168.1.100:2283", text: $immichURLText)
                     field("IMMICH API KEY",
                           placeholder: "create one in Immich under Account Settings > API Keys", text: $immichKeyText)
-                    Text("Shows a slideshow of your Immich favorites as channel \(PhotosChannel.number).")
+                    Text("Shows a slideshow of your Immich favorites as channel \(PhotosChannel.number). Create the key in Immich under Account Settings → API Keys — it only needs the asset.read and asset.view permissions (nothing else, and never write access).")
                         .font(.system(size: 17 * uiScale))
                         .foregroundColor(Theme.dimText)
                         .frame(maxWidth: 1000, alignment: .leading)
@@ -346,12 +346,25 @@ struct SettingsView: View {
         )
     }
 
-    private func sectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(Theme.mono(24 * uiScale))
-            .foregroundColor(Theme.dimText)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 12)
+    /// Section break: a rule across the settings column, then the title
+    /// with a color chip matching the channel's guide-cell color — so the
+    /// sections read as distinct blocks instead of one long form.
+    private func sectionHeader(_ title: String, tint: Color = Theme.dimText) -> some View {
+        VStack(alignment: .leading, spacing: 16 * uiScale) {
+            Rectangle()
+                .fill(Color(white: 0.24))
+                .frame(height: 2)
+            HStack(spacing: 12 * uiScale) {
+                Rectangle()
+                    .fill(tint)
+                    .frame(width: 16 * uiScale, height: 16 * uiScale)
+                Text(title)
+                    .font(Theme.mono(24 * uiScale))
+                    .foregroundColor(.white)
+            }
+        }
+        .frame(maxWidth: 1000, alignment: .leading)
+        .padding(.top, 30 * uiScale)
     }
 
     private func field(_ label: String, placeholder: String, text: Binding<String>) -> some View {
