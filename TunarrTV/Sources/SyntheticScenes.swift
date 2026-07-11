@@ -181,6 +181,9 @@ struct PhotoSceneView: View {
                                         .background(Color.black.opacity(0.45))
                                         .cornerRadius(6)
                                         .padding(28)
+                                        // Sit above the ticker bar instead
+                                        // of under it.
+                                        .padding(.bottom, state.tickerEnabled ? 56 : 0)
                                 }
                             }
                         }
