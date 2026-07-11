@@ -100,8 +100,10 @@ struct CamerasSceneView: View {
                     grid(cameras, in: geo.size)
                 }
                 // The badge is redundant (and overlaps) when a spare slot
-                // already shows the weather monitor.
-                if state.weatherOverlayOnCameras, !cameras.isEmpty, !showsWeatherTile(cameras.count) {
+                // already shows the weather monitor — or when the ticker
+                // is on with its own weather readout.
+                if state.weatherOverlayOnCameras, !cameras.isEmpty,
+                   !showsWeatherTile(cameras.count), !state.tickerEnabled {
                     VStack {
                         Spacer()
                         HStack {

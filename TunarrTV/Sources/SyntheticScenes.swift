@@ -199,7 +199,9 @@ struct PhotoSceneView: View {
                             .padding(.horizontal, 40)
                     }
                 }
-                if state.weatherOverlayOnPhotos, !panes.isEmpty {
+                // The badge stands down when the ticker is on — it already
+                // shows the weather along the bottom.
+                if state.weatherOverlayOnPhotos, !panes.isEmpty, !state.tickerEnabled {
                     VStack {
                         Spacer()
                         HStack {
