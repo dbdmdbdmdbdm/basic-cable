@@ -336,7 +336,9 @@ final class AppState: ObservableObject {
             return
         }
         if let (current, days) = try? await OpenMeteoClient().fetch(latitude: latitude, longitude: longitude) {
-            weatherData = WeatherData(current: current, days: days, houseSensors: sensors, fetchedAt: Date())
+            let locationName = await LocationResolver.name(latitude: latitude, longitude: longitude)
+            weatherData = WeatherData(current: current, days: days, houseSensors: sensors,
+                                      locationName: locationName, fetchedAt: Date())
         } else {
             weatherData.houseSensors = sensors
         }

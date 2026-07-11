@@ -83,4 +83,29 @@ enum LocationResolver {
         UserDefaults.standard.set("\(coordinate.latitude),\(coordinate.longitude)", forKey: cacheKey)
         return (coordinate.latitude, coordinate.longitude)
     }
+
+    /// "City, ST" (or the closest available) for a coordinate, cached so
+    /// CLGeocoder is hit once per ~1km cell.
+    static func name(latitude: Double, longitude: Double) async -> String? {
+        let cacheKey = String(format: "revgeo:%.2f,%.2f", latitude, longitude)
+        if let cached = UserDefaults.standard.string(forKey: cacheKey) {
+            return cached.isEmpty ? nil : cached
+        }
+        let location = CLLocation(latitude: latitude, longitude: longitude)
+        guard let placemark = try? await CLGeocoder().reverseGeocodeLocation(location).first else {
+            return nil  // transient failure — leave uncached so we retry
+        }
+        var name: String?
+        if let city = placemark.locality {
+            if let region = placemark.administrativeArea ?? placemark.isoCountryCode {
+                name = "\(city), \(region)"
+            } else {
+                name = city
+            }
+        } else {
+            name = placemark.administrativeArea ?? placemark.name
+        }
+        UserDefaults.standard.set(name ?? "", forKey: cacheKey)
+        return name
+    }
 }

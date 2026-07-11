@@ -187,10 +187,17 @@ struct WeatherSceneView: View {
         }
     }
 
+    private var tickerText: String {
+        // Attribution required by Open-Meteo's CC BY 4.0 license.
+        if let location = state.weatherData.locationName {
+            return "\(location.uppercased()) · WEATHER DATA BY OPEN-METEO.COM"
+        }
+        return "LOCAL FORECAST · WEATHER DATA BY OPEN-METEO.COM"
+    }
+
     private var tickerBar: some View {
         HStack {
-            // Attribution required by Open-Meteo's CC BY 4.0 license.
-            Text("LOCAL FORECAST · WEATHER DATA BY OPEN-METEO.COM")
+            Text(tickerText)
                 .font(Theme.mono(18 * s))
                 .foregroundColor(.black)
                 .lineLimit(1)

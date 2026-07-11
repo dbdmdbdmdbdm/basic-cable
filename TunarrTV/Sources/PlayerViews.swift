@@ -43,6 +43,7 @@ struct FullscreenPlayerView: View {
                 if state.isBuffering, let channel = state.tunedChannel {
                     TuningIndicator(channel: channel)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .ignoresSafeArea()
                 }
             }
 

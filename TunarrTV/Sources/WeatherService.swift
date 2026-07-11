@@ -28,6 +28,8 @@ struct WeatherData {
     var current: Current?
     var days: [Day] = []
     var houseSensors: [HouseSensor] = []
+    /// "City, ST" for the forecast coordinates (reverse-geocoded, cached).
+    var locationName: String?
     var fetchedAt = Date.distantPast
 
     var hasForecast: Bool { current != nil && !days.isEmpty }
