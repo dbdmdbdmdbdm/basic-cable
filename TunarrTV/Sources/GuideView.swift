@@ -287,16 +287,16 @@ struct ChannelLabelView: View {
             Rectangle()
                 .fill(accent)
                 .frame(width: max(5 * scale, 3))
-            ChannelLogoView(channel: channel, size: 38 * scale)
-            VStack(alignment: .leading, spacing: 1) {
+            ChannelLogoView(channel: channel, size: 34 * scale)
+            VStack(alignment: .leading, spacing: 0) {
                 Text("\(channel.number)")
-                    .font(Theme.mono(16 * scale, weight: .medium))
+                    .font(Theme.mono(14 * scale, weight: .medium))
                     .foregroundColor(Color(white: 0.8))
                 Text(channel.name.uppercased())
-                    .font(Theme.mono(17 * scale))
+                    .font(Theme.mono(19 * scale))
                     .foregroundColor(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.65)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.75)
             }
             Spacer(minLength: 0)
         }

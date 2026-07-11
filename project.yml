@@ -9,7 +9,7 @@ settings:
     SWIFT_VERSION: "5.9"
     TARGETED_DEVICE_FAMILY: "3"
     MARKETING_VERSION: "1.0"
-    CURRENT_PROJECT_VERSION: "4"
+    CURRENT_PROJECT_VERSION: "5"
     DEVELOPMENT_TEAM: 3CX5SB49L7
     ENABLE_USER_SCRIPT_SANDBOXING: "NO"
 targets:
@@ -20,6 +20,10 @@ targets:
       - TunarrTV/Sources
       - TunarrTV/Assets.xcassets
       - TunarrTV/Resources
+    entitlements:
+      path: TunarrTV/TunarrTV.entitlements
+      properties:
+        com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)$(CFBundleIdentifier)
     info:
       path: TunarrTV/Info.plist
       properties:
@@ -28,6 +32,16 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         ITSAppUsesNonExemptEncryption: false
         UIUserInterfaceStyle: Dark
+        UIAppFonts:
+          - VT323-Regular.ttf
+          - SpaceMono-Bold.ttf
+          - IBMPlexMono-Bold.ttf
+          - DepartureMono-Regular.otf
+          - Jersey15-Regular.ttf
+          - PixelifySans.ttf
+          - Doto.ttf
+          - Silkscreen-Bold.ttf
+          - PressStart2P-Regular.ttf
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
         NSLocalNetworkUsageDescription: Connects to your Tunarr server on the local network to stream channels.
@@ -54,6 +68,10 @@ targets:
       - TunarrTV/Sources
       - TunarrTV/AssetsiOS.xcassets
       - TunarrTV/Resources
+    entitlements:
+      path: TunarrTV/TunarrTViOS.entitlements
+      properties:
+        com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)$(CFBundleIdentifier)
     info:
       path: TunarrTV/Info-iOS.plist
       properties:

@@ -16,6 +16,21 @@ struct Channel: Identifiable, Decodable, Hashable {
     struct ChannelIcon: Decodable, Hashable {
         let path: String?
     }
+
+    /// Trims templated boilerplate from channel names so the guide column
+    /// reads at a glance: "Directed by X" → "X", "Best of X" → "X",
+    /// "X Marathon" → "X".
+    static func displayName(_ raw: String) -> String {
+        var name = raw.trimmingCharacters(in: .whitespaces)
+        for prefix in ["directed by ", "best of "] where name.lowercased().hasPrefix(prefix) {
+            name = String(name.dropFirst(prefix.count))
+            break
+        }
+        if name.lowercased().hasSuffix(" marathon") {
+            name = String(name.dropLast(" marathon".count))
+        }
+        return name.trimmingCharacters(in: .whitespaces)
+    }
 }
 
 struct GuideEntry: Identifiable, Hashable {

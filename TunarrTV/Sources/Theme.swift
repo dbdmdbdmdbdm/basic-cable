@@ -27,8 +27,19 @@ enum Theme {
     static let dimText = Color(white: 0.65)
     static let controlBackground = Color(white: 0.16)
 
+    /// Preview hook: `--font <PostScriptName>` swaps the app-wide face so
+    /// candidate fonts can be screenshotted side by side. No arg = SF Mono.
+    private static let fontOverride: String? = {
+        guard let index = CommandLine.arguments.firstIndex(of: "--font"),
+              index + 1 < CommandLine.arguments.count else { return nil }
+        return CommandLine.arguments[index + 1]
+    }()
+
     static func mono(_ size: CGFloat, weight: Font.Weight = .bold) -> Font {
-        .system(size: size, weight: weight, design: .monospaced)
+        if let fontOverride {
+            return .custom(fontOverride, size: size)
+        }
+        return .system(size: size, weight: weight, design: .monospaced)
     }
 
     // MARK: - Channel accent colors

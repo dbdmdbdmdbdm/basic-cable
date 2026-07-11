@@ -8,6 +8,7 @@ What the app does with data, in full:
 - **Weather** — the app requests forecasts from the free [Open-Meteo](https://open-meteo.com) public API using the approximate coordinates you configure (or your device's location, only if you grant permission). Coordinates are sent solely to return a forecast and are not stored by the app. Open-Meteo's privacy policy: https://open-meteo.com/en/terms
 - **Home Assistant (optional)** — if you configure a Home Assistant URL and token to show house sensor readings on the weather channel, the token is stored on your device and used only to read the sensor entities you list.
 - **Settings** — server URL, location, and preferences are stored on-device (and in your personal iCloud/device backups as with any app). They are never transmitted to the developer.
+- **iCloud sync (optional, on by default)** — settings, including the Home Assistant token if you configure one, sync between your own devices through iCloud key-value storage tied to your Apple ID. This data goes only to your iCloud account, never to the developer, and the sync can be turned off in Settings.
 
 The demo mode uses bundled sample video and the same Open-Meteo weather request described above.
 

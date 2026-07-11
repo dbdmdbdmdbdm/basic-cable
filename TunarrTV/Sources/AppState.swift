@@ -11,19 +11,27 @@ final class AppState: ObservableObject {
     static let weatherChannelId = WeatherChannel.id
 
     @Published var serverURLString: String {
-        didSet { UserDefaults.standard.set(serverURLString, forKey: "serverURL") }
+        didSet { persist(serverURLString, forKey: "serverURL") }
     }
     @Published var manualLocation: String {
-        didSet { UserDefaults.standard.set(manualLocation, forKey: "manualLocation") }
+        didSet { persist(manualLocation, forKey: "manualLocation") }
     }
     @Published var haURLString: String {
-        didSet { UserDefaults.standard.set(haURLString, forKey: "haURL") }
+        didSet { persist(haURLString, forKey: "haURL") }
     }
     @Published var haToken: String {
-        didSet { UserDefaults.standard.set(haToken, forKey: "haToken") }
+        didSet { persist(haToken, forKey: "haToken") }
     }
     @Published var haSensorEntities: String {
-        didSet { UserDefaults.standard.set(haSensorEntities, forKey: "haSensorEntities") }
+        didSet { persist(haSensorEntities, forKey: "haSensorEntities") }
+    }
+    /// Mirror settings through iCloud key-value storage so configuring the
+    /// iPhone app configures the Apple TV app (and vice versa).
+    @Published var iCloudSyncEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(iCloudSyncEnabled, forKey: "iCloudSyncEnabled")
+            if iCloudSyncEnabled { pushAllToCloud() }
+        }
     }
     @Published var weatherData = WeatherData()
 
@@ -74,12 +82,34 @@ final class AppState: ObservableObject {
 
     init() {
         let defaults = UserDefaults.standard
-        serverURLString = defaults.string(forKey: "serverURL") ?? ""
-        manualLocation = defaults.string(forKey: "manualLocation") ?? ""
-        haURLString = defaults.string(forKey: "haURL") ?? ""
-        haToken = defaults.string(forKey: "haToken") ?? ""
-        haSensorEntities = defaults.string(forKey: "haSensorEntities") ?? ""
+        let cloud = NSUbiquitousKeyValueStore.default
+        let syncEnabled = defaults.object(forKey: "iCloudSyncEnabled") as? Bool ?? true
+        iCloudSyncEnabled = syncEnabled
+        cloud.synchronize()
+
+        // Local value wins; an empty local slot adopts the iCloud value, so
+        // a freshly installed Apple TV app inherits the iPhone's settings.
+        func setting(_ key: String) -> String {
+            if let local = defaults.string(forKey: key), !local.isEmpty { return local }
+            if syncEnabled, let synced = cloud.string(forKey: key), !synced.isEmpty { return synced }
+            return ""
+        }
+        serverURLString = setting("serverURL")
+        manualLocation = setting("manualLocation")
+        haURLString = setting("haURL")
+        haToken = setting("haToken")
+        haSensorEntities = setting("haSensorEntities")
         windowStart = Self.floorToQuarterHour(Date())
+
+        NotificationCenter.default.addObserver(
+            forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
+            object: cloud, queue: .main
+        ) { [weak self] note in
+            let changed = note.userInfo?[NSUbiquitousKeyValueStoreChangedKeysKey] as? [String] ?? []
+            Task { @MainActor [weak self] in
+                self?.adoptCloudChanges(changed)
+            }
+        }
         player.preventsDisplaySleepDuringVideoPlayback = true
         // NOTE: automaticallyWaitsToMinimizeStalling stays TRUE — with it
         // disabled, a mid-play buffer underrun freezes the frame forever
@@ -93,6 +123,61 @@ final class AppState: ObservableObject {
             .receive(on: DispatchQueue.main)
             .map { $0 == .waitingToPlayAtSpecifiedRate }
             .assign(to: &$isBuffering)
+    }
+
+    // MARK: - Settings persistence & iCloud sync
+
+    private func persist(_ value: String, forKey key: String) {
+        UserDefaults.standard.set(value, forKey: key)
+        if iCloudSyncEnabled {
+            NSUbiquitousKeyValueStore.default.set(value, forKey: key)
+        }
+    }
+
+    private func pushAllToCloud() {
+        persist(serverURLString, forKey: "serverURL")
+        persist(manualLocation, forKey: "manualLocation")
+        persist(haURLString, forKey: "haURL")
+        persist(haToken, forKey: "haToken")
+        persist(haSensorEntities, forKey: "haSensorEntities")
+    }
+
+    /// Applies settings changed on another device. Local edits re-persist
+    /// through `persist`, which is idempotent, so no feedback loop.
+    private func adoptCloudChanges(_ keys: [String]) {
+        guard iCloudSyncEnabled, !isDemoMode else { return }
+        let cloud = NSUbiquitousKeyValueStore.default
+        var serverChanged = false
+        var weatherChanged = false
+        for key in keys {
+            let value = cloud.string(forKey: key) ?? ""
+            switch key {
+            case "serverURL" where value != serverURLString && !value.isEmpty:
+                serverURLString = value
+                serverChanged = true
+            case "manualLocation" where value != manualLocation:
+                manualLocation = value
+                weatherChanged = true
+            case "haURL" where value != haURLString:
+                haURLString = value
+                weatherChanged = true
+            case "haToken" where value != haToken:
+                haToken = value
+                weatherChanged = true
+            case "haSensorEntities" where value != haSensorEntities:
+                haSensorEntities = value
+                weatherChanged = true
+            default:
+                break
+            }
+        }
+        if serverChanged {
+            loadError = nil
+            Task { await reload() }
+        }
+        if weatherChanged {
+            Task { await refreshWeather(force: true) }
+        }
     }
 
     static func floorToQuarterHour(_ date: Date) -> Date {
@@ -125,6 +210,12 @@ final class AppState: ObservableObject {
             showSettings = true
         } else {
             await reload()
+            // Screenshot hooks: land on the guide / open settings.
+            if CommandLine.arguments.contains("--guide") { isFullscreen = false }
+            if CommandLine.arguments.contains("--settings") {
+                isFullscreen = false
+                showSettings = true
+            }
         }
         await refreshWeather()
         startTimers()

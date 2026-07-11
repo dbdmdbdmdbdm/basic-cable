@@ -31,6 +31,18 @@
 	<string>Connects to your Tunarr server on the local network to stream channels.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Used to show your local forecast on the weather channel.</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>VT323-Regular.ttf</string>
+		<string>SpaceMono-Bold.ttf</string>
+		<string>IBMPlexMono-Bold.ttf</string>
+		<string>DepartureMono-Regular.otf</string>
+		<string>Jersey15-Regular.ttf</string>
+		<string>PixelifySans.ttf</string>
+		<string>Doto.ttf</string>
+		<string>Silkscreen-Bold.ttf</string>
+		<string>PressStart2P-Regular.ttf</string>
+	</array>
 	<key>UIUserInterfaceStyle</key>
 	<string>Dark</string>
 </dict>

@@ -20,6 +20,8 @@ struct TunarrClient {
         let (data, _) = try await URLSession.shared.data(from: url)
         let channels = try JSONDecoder().decode([Channel].self, from: data)
         return channels
+            .map { Channel(id: $0.id, name: Channel.displayName($0.name), number: $0.number,
+                           icon: $0.icon, groupTitle: $0.groupTitle) }
             .sorted { $0.number < $1.number }
     }
 
@@ -38,7 +40,8 @@ struct TunarrClient {
         var guide: [String: [GuideEntry]] = [:]
         for (channelId, rawChannel) in raw {
             let entries = rawChannel.programs
-                .compactMap { GuideEntry(raw: $0, channelId: channelId, channelName: rawChannel.name) }
+                .compactMap { GuideEntry(raw: $0, channelId: channelId,
+                                         channelName: Channel.displayName(rawChannel.name)) }
                 .sorted { $0.start < $1.start }
             guide[channelId] = entries
         }

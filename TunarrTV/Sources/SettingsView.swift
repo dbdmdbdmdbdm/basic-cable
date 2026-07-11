@@ -35,6 +35,13 @@ struct SettingsView: View {
                         .foregroundColor(Theme.dimText)
                         .frame(maxWidth: 900)
                         .multilineTextAlignment(.center)
+                    #if os(tvOS)
+                    Text("Tip: set everything up in the iPhone app instead — settings sync here automatically via iCloud.")
+                        .font(.system(size: 19 * uiScale))
+                        .foregroundColor(Theme.dimText)
+                        .frame(maxWidth: 900)
+                        .multilineTextAlignment(.center)
+                    #endif
                 }
 
                 field("TUNARR SERVER URL", placeholder: "http://192.168.1.100:8000", text: $urlText)
@@ -78,6 +85,17 @@ struct SettingsView: View {
                           placeholder: "eyJhbGciOi...", text: $haTokenText)
                     field("HA SENSOR ENTITIES (COMMA-SEPARATED)",
                           placeholder: "sensor.outdoor_temp, sensor.pool_temp", text: $haSensorsText)
+
+                    sectionHeader("SYNC")
+                    Toggle(isOn: $state.iCloudSyncEnabled) {
+                        Text("SYNC SETTINGS VIA ICLOUD")
+                            .font(Theme.mono(20 * uiScale, weight: .medium))
+                    }
+                    .frame(maxWidth: 1000)
+                    Text("Shares these settings (including the Home Assistant token) across your devices through your own iCloud account.")
+                        .font(.system(size: 17 * uiScale))
+                        .foregroundColor(Theme.dimText)
+                        .frame(maxWidth: 1000, alignment: .leading)
                 }
 
                 HStack(spacing: 24) {
