@@ -99,7 +99,9 @@ struct CamerasSceneView: View {
                 } else {
                     grid(cameras, in: geo.size)
                 }
-                if state.weatherOverlayOnCameras, !cameras.isEmpty {
+                // The badge is redundant (and overlaps) when a spare slot
+                // already shows the weather monitor.
+                if state.weatherOverlayOnCameras, !cameras.isEmpty, !showsWeatherTile(cameras.count) {
                     VStack {
                         Spacer()
                         HStack {
@@ -128,6 +130,7 @@ struct CamerasSceneView: View {
     private func grid(_ cameras: [String], in size: CGSize) -> some View {
         let columns = cameras.count == 1 ? 1 : (cameras.count <= 4 ? 2 : 3)
         let rows = Int(ceil(Double(cameras.count) / Double(columns)))
+        let slots = rows * columns
         let tileWidth = size.width / CGFloat(columns)
         let tileHeight = size.height / CGFloat(rows)
         return VStack(spacing: 0) {
@@ -135,24 +138,38 @@ struct CamerasSceneView: View {
                 HStack(spacing: 0) {
                     ForEach(0..<columns, id: \.self) { column in
                         let index = row * columns + column
-                        if index < cameras.count {
-                            CameraTileView(entityId: cameras[index], index: index, compact: compact)
-                                .frame(width: tileWidth, height: tileHeight)
-                        } else {
-                            // Empty slot in the bank — dead monitor.
-                            ZStack {
-                                Color.black
-                                Text("NO INPUT")
-                                    .font(Theme.mono(compact ? 10 : 18))
-                                    .foregroundColor(Color(white: 0.25))
+                        Group {
+                            if index < cameras.count {
+                                CameraTileView(entityId: cameras[index], index: index, compact: compact)
+                            } else if index == slots - 1, state.weatherData.current != nil {
+                                // The bank's spare monitor shows the weather
+                                // instead of sitting dead.
+                                WeatherTileView(compact: compact)
+                            } else {
+                                deadMonitor
                             }
-                            .frame(width: tileWidth, height: tileHeight)
-                            .border(Color(white: 0.18), width: 1)
                         }
+                        .frame(width: tileWidth, height: tileHeight)
                     }
                 }
             }
         }
+    }
+
+    private func showsWeatherTile(_ count: Int) -> Bool {
+        let columns = count == 1 ? 1 : (count <= 4 ? 2 : 3)
+        let rows = Int(ceil(Double(count) / Double(columns)))
+        return rows * columns > count && state.weatherData.current != nil
+    }
+
+    private var deadMonitor: some View {
+        ZStack {
+            Color.black
+            Text("NO INPUT")
+                .font(Theme.mono(compact ? 10 : 18))
+                .foregroundColor(Color(white: 0.25))
+        }
+        .border(Color(white: 0.18), width: 1)
     }
 }
 
@@ -261,6 +278,76 @@ private struct CameraTileView: View {
             }
             _ = player // keep a strong reference alive for the loop's duration
         }
+    }
+}
+
+/// The weather channel, monitor-bank edition: fills a spare grid slot with
+/// current conditions and a short forecast, styled like the other monitors.
+private struct WeatherTileView: View {
+    @EnvironmentObject var state: AppState
+    var compact = false
+
+    var body: some View {
+        ZStack {
+            // Deep weather-channel blue so it reads as its own feed.
+            Color(red: 0.05, green: 0.08, blue: 0.20)
+            if let current = state.weatherData.current {
+                VStack(spacing: compact ? 3 : 12) {
+                    HStack(spacing: compact ? 6 : 16) {
+                        Image(systemName: WMO.symbol(current.code))
+                            .symbolRenderingMode(.multicolor)
+                            .font(.system(size: compact ? 16 : 46))
+                        Text("\(Int(current.temperature.rounded()))°")
+                            .font(Theme.mono(compact ? 24 : 64))
+                            .foregroundColor(.white)
+                    }
+                    Text(WMO.description(current.code))
+                        .font(Theme.mono(compact ? 9 : 20, weight: .medium))
+                        .foregroundColor(Color(white: 0.85))
+                    if let today = state.weatherData.days.first {
+                        Text("HI \(Int(today.high.rounded()))°  LO \(Int(today.low.rounded()))°")
+                            .font(Theme.mono(compact ? 8 : 17, weight: .medium))
+                            .foregroundColor(Color(white: 0.65))
+                    }
+                    if !compact {
+                        HStack(spacing: 26) {
+                            ForEach(state.weatherData.days.dropFirst().prefix(3)) { day in
+                                VStack(spacing: 4) {
+                                    Text(Self.dayName(day.date))
+                                        .font(Theme.mono(14, weight: .medium))
+                                        .foregroundColor(Color(white: 0.65))
+                                    Image(systemName: WMO.symbol(day.code))
+                                        .symbolRenderingMode(.multicolor)
+                                        .font(.system(size: 18))
+                                    Text("\(Int(day.high.rounded()))°")
+                                        .font(Theme.mono(15, weight: .medium))
+                                        .foregroundColor(.white)
+                                }
+                            }
+                        }
+                        .padding(.top, 4)
+                    }
+                }
+            }
+            VStack {
+                HStack {
+                    Text("WX · LOCAL WEATHER")
+                        .font(Theme.mono(compact ? 9 : 17, weight: .medium))
+                        .foregroundColor(.white.opacity(0.9))
+                        .shadow(color: .black, radius: 0, x: 1, y: 1)
+                    Spacer()
+                }
+                Spacer()
+            }
+            .padding(compact ? 5 : 12)
+        }
+        .border(Color(white: 0.18), width: 1)
+    }
+
+    private static func dayName(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE"
+        return formatter.string(from: date).uppercased()
     }
 }
 

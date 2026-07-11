@@ -148,7 +148,7 @@ struct SettingsView: View {
                     field("SNAPSHOT URLS (COMMA-SEPARATED, OPTIONAL NAME=URL)",
                           placeholder: "http://192.168.1.100:8090/latest.png, Kitchen=http://…/latest/1.png",
                           text: $dashURLText)
-                    Text("Each URL becomes its own channel — the first is \(HADashboardChannel.number), extras count down from 996. Name them like \"Kitchen=http://…\". Snapshots come from the ha-screencap companion (Home Assistant add-on or Docker container — see the GitHub README).")
+                    Text("Each URL becomes its own channel — the first is \(HADashboardChannel.number), extras count down from 996. Name them like \"Kitchen=http://…\". Just the server address works too (/latest.png is assumed). Snapshots come from the ha-screencap companion (Home Assistant add-on or Docker container — see the GitHub README).")
                         .font(.system(size: 17 * uiScale))
                         .foregroundColor(Theme.dimText)
                         .frame(maxWidth: 1000, alignment: .leading)

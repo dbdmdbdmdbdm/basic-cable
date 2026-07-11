@@ -171,7 +171,12 @@ final class AppState: ObservableObject {
                 name = String(trimmed[..<eq]).trimmingCharacters(in: .whitespaces)
                 urlText = String(trimmed[trimmed.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
             }
-            guard let url = URL(string: urlText), url.scheme != nil else { continue }
+            guard var url = URL(string: urlText), url.scheme != nil else { continue }
+            // A bare server address ("http://ha:8090") means its default
+            // snapshot — /latest.png is assumed.
+            if url.path.isEmpty || url.path == "/" {
+                url = url.appendingPathComponent("latest.png")
+            }
             configs.append(DashboardConfig(name: name, url: url))
             if configs.count == 8 { break }
         }
@@ -654,9 +659,11 @@ final class AppState: ObservableObject {
             itemFailureWatch = nil
             clearDemoLoop()
             player.replaceCurrentItem(with: nil)
+            // Cameras always want weather: a spare grid slot shows the
+            // mini weather monitor (plus the optional overlay badge).
             if channel.id == Self.weatherChannelId
-                || (channel.id == Self.photosChannelId && weatherOverlayOnPhotos)
-                || (channel.id == Self.camerasChannelId && weatherOverlayOnCameras) {
+                || channel.id == Self.camerasChannelId
+                || (channel.id == Self.photosChannelId && weatherOverlayOnPhotos) {
                 Task { await refreshWeather() }
             }
             return

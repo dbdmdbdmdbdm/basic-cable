@@ -158,8 +158,10 @@ http
       res.end(JSON.stringify({ ok, dashboards }));
       return;
     }
-    // /latest.png (first dashboard) or /latest/<index>.png
-    const match = req.url.match(/^\/latest(?:\/(\d+))?(?:\.png)?(?:\?|$)/);
+    // /latest.png (first dashboard) or /latest/<index>.png; the bare root
+    // serves the first dashboard too, so the server address alone works.
+    const path = req.url === '/' || req.url.startsWith('/?') ? '/latest' : req.url;
+    const match = path.match(/^\/latest(?:\/(\d+))?(?:\.png)?(?:\?|$)/);
     if (match) {
       const index = +(match[1] || 0);
       const image = latests[index];
