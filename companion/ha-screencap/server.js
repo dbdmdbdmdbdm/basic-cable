@@ -74,36 +74,41 @@ try {
 }
 
 async function newPage(browser) {
-  const page = await browser.newPage();
-  await page.setViewport({ width: WIDTH, height: HEIGHT });
-  if (DARK) {
-    await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'dark' }]);
-  }
-  // Load the HA origin so localStorage is writable, then seed the auth the
-  // same way hass-lovelace-kindle-screensaver does: a long-lived token in
-  // hassTokens with a far-future expiry so the frontend never refreshes it.
+  // The whole setup retries as one unit: HA can be unreachable, and its
+  // frontend can navigate (auth redirect) mid-setup, which destroys the
+  // execution context under the localStorage seeding — never fatal.
   for (let attempt = 1; ; attempt++) {
+    const page = await browser.newPage();
     try {
+      await page.setViewport({ width: WIDTH, height: HEIGHT });
+      if (DARK) {
+        await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'dark' }]);
+      }
+      // Load the HA origin so localStorage is writable, then seed the auth
+      // the same way hass-lovelace-kindle-screensaver does: a long-lived
+      // token in hassTokens with a far-future expiry so the frontend never
+      // refreshes it. The short settle lets any auth redirect land first.
       await page.goto(HA_URL + '/', { waitUntil: 'domcontentloaded', timeout: 30000 });
-      break;
+      await sleep(1500);
+      await page.evaluate((tokens) => {
+        localStorage.setItem('hassTokens', JSON.stringify(tokens));
+      }, {
+        access_token: HA_TOKEN,
+        token_type: 'Bearer',
+        expires_in: 1800,
+        hassUrl: HA_URL,
+        clientId: null,
+        expires: 9999999999999,
+        refresh_token: '',
+      });
+      await page.goto(HA_URL + DASH_PATHS[0], { waitUntil: 'networkidle2', timeout: 60000 });
+      return page;
     } catch (e) {
-      console.error(`HA unreachable (attempt ${attempt}): ${e.message}`);
+      console.error(`page setup failed (attempt ${attempt}): ${e.message}`);
+      try { await page.close(); } catch (_) { /* already gone */ }
       await sleep(Math.min(60000, attempt * 5000));
     }
   }
-  await page.evaluate((tokens) => {
-    localStorage.setItem('hassTokens', JSON.stringify(tokens));
-  }, {
-    access_token: HA_TOKEN,
-    token_type: 'Bearer',
-    expires_in: 1800,
-    hassUrl: HA_URL,
-    clientId: null,
-    expires: 9999999999999,
-    refresh_token: '',
-  });
-  await page.goto(HA_URL + DASH_PATHS[0], { waitUntil: 'networkidle2', timeout: 60000 });
-  return page;
 }
 
 // Best-effort: hide the HA header + sidebar inside the shadow DOM so the
@@ -143,6 +148,14 @@ async function captureLoop() {
     executablePath: process.env.CHROME_PATH || '/usr/bin/chromium',
     args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--hide-scrollbars'],
   });
+  try {
+    await captureWith(browser);
+  } finally {
+    try { await browser.close(); } catch (_) { /* already dead */ }
+  }
+}
+
+async function captureWith(browser) {
   let page = await newPage(browser);
   let shotsSinceReload = 0;
   let current = 0;
@@ -232,7 +245,15 @@ http
   })
   .listen(PORT, () => console.log(`serving on :${PORT}`));
 
-captureLoop().catch((e) => {
-  console.error(`fatal: ${e.stack || e}`);
-  process.exit(1); // docker restart policy brings us back
-});
+// Never die: the HTTP server keeps serving (healthz goes 503, stale
+// frames stay available) while the capture loop rebuilds itself.
+(async () => {
+  for (;;) {
+    try {
+      await captureLoop();
+    } catch (e) {
+      console.error(`capture loop crashed, restarting in 30s: ${e.stack || e}`);
+      await sleep(30000);
+    }
+  }
+})();
