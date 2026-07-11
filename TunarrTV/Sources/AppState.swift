@@ -114,6 +114,7 @@ final class AppState: ObservableObject {
     private var prefetchTask: Task<Void, Never>?
     private var lastPrefetchedChannelId: String?
     private var itemFailureWatch: AnyCancellable?
+    private var pendingTune: Task<Void, Never>?
     private var retryCount = 0
     private var bufferingSince: Date?
 
@@ -817,15 +818,22 @@ final class AppState: ObservableObject {
     func tune(_ channel: Channel, isRetry: Bool = false) {
         if !isRetry { retryCount = 0 }
         bufferingSince = nil
+        let previous = tunedChannel
         tunedChannel = channel
         isPaused = false
         UserDefaults.standard.set(channel.id, forKey: "lastChannelId")
+        // Leaving a Tunarr channel? Reap its abandoned session once our
+        // player lets go — surf litter shouldn't sit on the transcoder.
+        if let previous, previous.id != channel.id {
+            cleanUpAbandonedSession(previous)
+        }
         // The ticker shows weather on whatever channel is tuned.
         if tickerEnabled {
             Task { await refreshWeather() }
         }
         if Self.isSyntheticChannel(channel.id) {
             itemFailureWatch = nil
+            pendingTune?.cancel()
             clearDemoLoop()
             player.replaceCurrentItem(with: nil)
             // Cameras always want weather: a spare grid slot shows the
@@ -839,6 +847,7 @@ final class AppState: ObservableObject {
         }
         if isDemoMode {
             itemFailureWatch = nil
+            pendingTune?.cancel()
             clearDemoLoop()
             guard let url = DemoContent.clipURL(for: channel) else {
                 player.replaceCurrentItem(with: nil)
@@ -858,6 +867,32 @@ final class AppState: ObservableObject {
             player.play()
             return
         }
+        // Surf guard: drop the old stream now, but only start the new one
+        // once the user settles — rapid zapping spawns zero sessions.
+        // Retries skip the debounce (retryTune already waited).
+        itemFailureWatch = nil
+        player.replaceCurrentItem(with: nil)
+        pendingTune?.cancel()
+        if isRetry {
+            startStream(channel)
+            return
+        }
+        pendingTune = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 650_000_000)
+            guard !Task.isCancelled, let self, self.tunedChannel?.id == channel.id else { return }
+            // When the server is already juggling many sessions, hold off
+            // a little longer before adding one more.
+            if let client = self.client,
+               let snapshot = try? await client.sessionSnapshot(),
+               snapshot.total >= 6 {
+                try? await Task.sleep(nanoseconds: 850_000_000)
+                guard !Task.isCancelled, self.tunedChannel?.id == channel.id else { return }
+            }
+            self.startStream(channel)
+        }
+    }
+
+    private func startStream(_ channel: Channel) {
         guard let client else { return }
         let item = AVPlayerItem(url: client.streamURL(for: channel))
         item.preferredForwardBufferDuration = 2
@@ -870,6 +905,47 @@ final class AppState: ObservableObject {
             }
         player.replaceCurrentItem(with: item)
         player.playImmediately(atRate: 1.0)
+    }
+
+    /// Asks Tunarr to end a channel's transcode session a moment after we
+    /// leave it — but only when nobody else is connected (grouped viewing
+    /// keeps its session), and never for the channel we're back on.
+    private func cleanUpAbandonedSession(_ channel: Channel) {
+        guard !Self.isSyntheticChannel(channel.id), !isDemoMode, let client else { return }
+        Task { [weak self] in
+            // Let AVPlayer drop its playlist connections first.
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard let self, self.tunedChannel?.id != channel.id else { return }
+            guard let snapshot = try? await client.sessionSnapshot(),
+                  let connections = snapshot.connectionsByChannel[channel.id],
+                  connections <= 1 else { return }
+            guard self.tunedChannel?.id != channel.id else { return }
+            await client.stopSessions(channelId: channel.id)
+        }
+    }
+
+    /// Backgrounding stops playback outright and reaps our session;
+    /// foregrounding re-tunes fresh. Without this, a TV put to sleep
+    /// leaves a transcode running until the server notices.
+    func appDidEnterBackground() {
+        guard let channel = tunedChannel, !Self.isSyntheticChannel(channel.id), !isDemoMode else { return }
+        pendingTune?.cancel()
+        itemFailureWatch = nil
+        player.replaceCurrentItem(with: nil)
+        guard let client else { return }
+        Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard let snapshot = try? await client.sessionSnapshot(),
+                  let connections = snapshot.connectionsByChannel[channel.id],
+                  connections <= 1 else { return }
+            await client.stopSessions(channelId: channel.id)
+        }
+    }
+
+    func appDidBecomeActive() {
+        guard let channel = tunedChannel, !Self.isSyntheticChannel(channel.id), !isDemoMode,
+              player.currentItem == nil else { return }
+        tune(channel, isRetry: true)
     }
 
     private func retryTune() {
