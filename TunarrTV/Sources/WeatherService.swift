@@ -255,13 +255,19 @@ struct HAClient {
             }
         }
         var groups: [(key: String, title: String, artist: String?, players: [String])] = []
+        // Anything with a real title, playing or paused — the fallback pool
+        // for resolving a soundbar's generic "TV" into the actual show.
+        var titled: [(player: String, title: String, artist: String?)] = []
         for entityId in entityIds {
             guard let (data, response) = try? await URLSession.shared.data(for: request(path: "api/states/\(entityId)")),
                   (response as? HTTPURLResponse)?.statusCode == 200,
                   let entity = try? JSONDecoder().decode(EntityState.self, from: data),
-                  entity.state == "playing",
                   let title = entity.attributes.media_title, !title.isEmpty else { continue }
             let player = entity.attributes.friendly_name ?? entityId
+            if title.uppercased() != "TV", ["playing", "paused"].contains(entity.state) {
+                titled.append((player, title, entity.attributes.media_artist))
+            }
+            guard entity.state == "playing" else { continue }
             let key = "\(title)|\(entity.attributes.media_artist ?? "")"
             if let index = groups.firstIndex(where: { $0.key == key }) {
                 groups[index].players.append(player)
@@ -269,7 +275,24 @@ struct HAClient {
                 groups.append((key, title, entity.attributes.media_artist, [player]))
             }
         }
-        return groups.map { NowPlayingItem(title: $0.title, artist: $0.artist, players: $0.players) }
+        var items = groups.map { NowPlayingItem(title: $0.title, artist: $0.artist, players: $0.players) }
+
+        // A Sonos playing its TV input reports the useless title "TV".
+        // If something else in the list has the real title, drop the "TV"
+        // entry; failing that, borrow the show name from a TV player in
+        // the same room (matched by a shared word in the names).
+        let real = items.filter { $0.title.uppercased() != "TV" }
+        if !real.isEmpty {
+            items = real
+        } else if let tvItem = items.first(where: { $0.title.uppercased() == "TV" }) {
+            let tvWords = Set(tvItem.players.flatMap { $0.lowercased().split(separator: " ").map(String.init) })
+            let match = titled.first { !tvWords.isDisjoint(with: $0.player.lowercased().split(separator: " ").map(String.init)) }
+                ?? titled.first
+            if let match {
+                items = [NowPlayingItem(title: match.title, artist: match.artist, players: tvItem.players)]
+            }
+        }
+        return items
     }
 
     /// One entity's state + friendly name, skipping dead entities.

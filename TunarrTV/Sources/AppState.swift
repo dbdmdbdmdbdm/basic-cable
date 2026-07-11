@@ -184,6 +184,11 @@ final class AppState: ObservableObject {
             let scroll: Bool?
             let entities: [TickerEntity]?
         }
+        struct Dashboard: Decodable, Equatable {
+            let index: Int
+            let name: String?
+        }
+        let dashboards: [Dashboard]?
         let cameras: [String]?
         let weather_sensors: [String]?
         let media_players: [String]?
@@ -191,12 +196,17 @@ final class AppState: ObservableObject {
     }
 
     @Published private(set) var remoteConfig: RemoteAppConfig?
+    /// The origin that served /appconfig — remote dashboards resolve to
+    /// /latest/<index>.png on it.
+    @Published private(set) var remoteConfigOrigin: URL?
 
     /// Probes each configured dashboard origin for /appconfig — the add-on
     /// that serves the snapshots also serves the app config.
     func refreshRemoteConfig() async {
         var origins: [URL] = []
-        for dashboard in dashboards {
+        // Probe the on-device snapshot URLs (not the effective list —
+        // that would be circular once remote dashboards take over).
+        for dashboard in Self.parseDashboards(dashImageURLString) {
             guard var components = URLComponents(url: dashboard.url, resolvingAgainstBaseURL: false) else { continue }
             components.path = "/appconfig"
             components.query = nil
@@ -209,11 +219,15 @@ final class AppState: ObservableObject {
             if let (data, response) = try? await URLSession.shared.data(for: request),
                (response as? HTTPURLResponse)?.statusCode == 200,
                let config = try? JSONDecoder().decode(RemoteAppConfig.self, from: data) {
+                var origin = URLComponents(url: url, resolvingAgainstBaseURL: false)
+                origin?.path = ""
                 if config != remoteConfig { remoteConfig = config }
+                remoteConfigOrigin = origin?.url
                 return
             }
         }
         if remoteConfig != nil { remoteConfig = nil }
+        remoteConfigOrigin = nil
     }
 
     /// Non-empty remote lists win over the on-device fields.
@@ -275,11 +289,21 @@ final class AppState: ObservableObject {
         let url: URL
     }
 
-    /// Dashboard channels parsed from the settings field: comma-separated
-    /// snapshot URLs, each optionally prefixed "NAME=" ("Kitchen=http://…").
-    /// The first keeps channel 998; extras count down from 996 (997 is
-    /// photos). Capped at 8 so the numbering never collides with cameras.
-    var dashboards: [DashboardConfig] { Self.parseDashboards(dashImageURLString) }
+    /// Dashboard channels. Normally parsed from the settings field
+    /// (comma-separated snapshot URLs, optionally "NAME=URL"); when the
+    /// add-on's app config lists dashboards, those win — each resolves to
+    /// /latest/<index>.png on the add-on's origin. First keeps channel
+    /// 998; extras count down from 996 (997 is photos). Capped at 8.
+    var dashboards: [DashboardConfig] {
+        if let remote = remoteConfig?.dashboards, !remote.isEmpty, let origin = remoteConfigOrigin {
+            return remote.prefix(8).map { dashboard in
+                let path = dashboard.index == 0 ? "latest.png" : "latest/\(dashboard.index).png"
+                return DashboardConfig(name: dashboard.name ?? "",
+                                       url: origin.appendingPathComponent(path))
+            }
+        }
+        return Self.parseDashboards(dashImageURLString)
+    }
 
     static func parseDashboards(_ text: String) -> [DashboardConfig] {
         var configs: [DashboardConfig] = []
