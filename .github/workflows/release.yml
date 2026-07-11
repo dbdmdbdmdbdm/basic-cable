@@ -44,6 +44,32 @@ jobs:
           echo "${{ secrets.ASC_KEY_P8_BASE64 }}" | base64 --decode \
             > ~/.appstoreconnect/private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
 
+      # Import a stable signing cert instead of letting -allowProvisioningUpdates
+      # mint a new Apple Development cert on every ephemeral runner (those pile up
+      # until the account hits the cert cap and archiving fails with "Choose a
+      # certificate to revoke"). -allowProvisioningUpdates stays: it still fetches
+      # provisioning profiles and handles cloud-managed Distribution signing at
+      # export, but Xcode reuses the imported cert rather than creating one.
+      - name: Import signing certificate
+        env:
+          SIGNING_CERT_P12_BASE64: ${{ secrets.SIGNING_CERT_P12_BASE64 }}
+          SIGNING_CERT_P12_PASSWORD: ${{ secrets.SIGNING_CERT_P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "$SIGNING_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/signing_cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/signing_cert.p12" \
+            -P "$SIGNING_CERT_P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+          rm "$RUNNER_TEMP/signing_cert.p12"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
       - name: Archive + export + upload (tvOS, then iOS)
         env:
           KEY_ID: ${{ secrets.ASC_KEY_ID }}
