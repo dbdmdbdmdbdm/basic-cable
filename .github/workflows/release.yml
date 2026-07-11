@@ -1,0 +1,79 @@
+name: Release to App Store Connect
+
+# Public build-and-upload: anyone can inspect these logs to see exactly
+# which commit produced each build number uploaded to App Store Connect.
+# See VERIFYING.md for the full verification story.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: "CFBundleVersion (check ASC for the current top build first)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-upload:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Set build number (manual runs only)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          /usr/bin/sed -i '' "s/CURRENT_PROJECT_VERSION: \".*\"/CURRENT_PROJECT_VERSION: \"${{ inputs.build_number }}\"/" project.yml
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Write ASC API key
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo "${{ secrets.ASC_KEY_P8_BASE64 }}" | base64 --decode \
+            > ~/.appstoreconnect/private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
+
+      - name: Archive + export + upload (tvOS, then iOS)
+        env:
+          KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          cat > ExportOptions.plist <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>teamID</key><string>3CX5SB49L7</string>
+            <key>uploadSymbols</key><true/>
+          </dict></plist>
+          EOF
+          for PLATFORM in tvOS iOS; do
+            SCHEME=TunarrTV; TYPE=appletvos
+            if [ "$PLATFORM" = iOS ]; then SCHEME=TunarrTViOS; TYPE=ios; fi
+            xcodebuild -project TunarrTV.xcodeproj -scheme "$SCHEME" \
+              -configuration Release -destination "generic/platform=$PLATFORM" \
+              -archivePath "build/$SCHEME.xcarchive" archive \
+              -allowProvisioningUpdates \
+              -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8 \
+              -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID"
+            xcodebuild -exportArchive -archivePath "build/$SCHEME.xcarchive" \
+              -exportPath "build/Export-$PLATFORM" -exportOptionsPlist ExportOptions.plist \
+              -allowProvisioningUpdates \
+              -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8 \
+              -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID"
+            xcrun altool --upload-app --type "$TYPE" \
+              --file build/Export-$PLATFORM/$SCHEME.ipa \
+              --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID"
+          done
+
+      - name: Log build provenance
+        run: |
+          echo "Uploaded commit: $GITHUB_SHA (short: $(git rev-parse --short=7 HEAD))"
+          echo "Build number: $(grep CURRENT_PROJECT_VERSION project.yml)"

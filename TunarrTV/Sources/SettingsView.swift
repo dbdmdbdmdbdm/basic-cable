@@ -174,6 +174,11 @@ struct SettingsView: View {
     private static var versionString: String {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
+        // Commit stamped at build time — lets anyone match this binary to
+        // the exact source on GitHub (see VERIFYING.md in the repo).
+        if let commit = Bundle.main.object(forInfoDictionaryKey: "GitCommit") as? String {
+            return "V\(version) (\(build)) · \(commit.uppercased())"
+        }
         return "V\(version) (\(build))"
     }
 
