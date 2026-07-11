@@ -42,34 +42,6 @@ enum Theme {
         return .system(size: size, weight: weight, design: .monospaced)
     }
 
-    // MARK: - Channel accent colors
-
-    /// Fixed retro palette for channel accent stripes.
-    static let accentPalette: [Color] = [
-        Color(red: 0.85, green: 0.25, blue: 0.25),  // red
-        Color(red: 0.95, green: 0.55, blue: 0.15),  // orange
-        Color(red: 0.93, green: 0.78, blue: 0.20),  // yellow
-        Color(red: 0.30, green: 0.75, blue: 0.35),  // green
-        Color(red: 0.25, green: 0.72, blue: 0.83),  // cyan
-        Color(red: 0.55, green: 0.48, blue: 0.90),  // violet
-        Color(red: 0.88, green: 0.40, blue: 0.68),  // magenta
-    ]
-
-    /// Accent for a channel: by group when the lineup has multiple groups
-    /// (so groups cluster visually), otherwise a rainbow by channel number.
-    static func channelAccent(for channel: Channel, multipleGroups: Bool) -> Color {
-        if channel.id == WeatherChannel.id {
-            return Color(red: 0.95, green: 0.78, blue: 0.12)
-        }
-        if multipleGroups, let group = channel.groupTitle {
-            // djb2 — stable across launches, unlike hashValue.
-            var hash: UInt64 = 5381
-            for byte in group.utf8 { hash = hash &* 33 &+ UInt64(byte) }
-            return accentPalette[Int(hash % UInt64(accentPalette.count))]
-        }
-        return accentPalette[max(0, channel.number - 1) % accentPalette.count]
-    }
-
     static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "h:mm"

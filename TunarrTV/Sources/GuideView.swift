@@ -108,10 +108,6 @@ struct GuideView: View {
         .frame(height: rowHeight)
     }
 
-    private var hasMultipleGroups: Bool {
-        Set(state.channels.compactMap(\.groupTitle)).count > 1
-    }
-
     private func channelLabel(_ channel: Channel) -> some View {
         Button {
             // Same semantics as program cells: tap to tune, tap the
@@ -125,7 +121,6 @@ struct GuideView: View {
             ChannelLabelView(
                 channel: channel,
                 isTuned: state.tunedChannel?.id == channel.id,
-                accent: Theme.channelAccent(for: channel, multipleGroups: hasMultipleGroups),
                 scale: scale
             )
         }
@@ -279,15 +274,12 @@ struct ChannelLabelView: View {
     @Environment(\.isFocused) private var isFocused
     let channel: Channel
     let isTuned: Bool
-    let accent: Color
     let scale: CGFloat
 
     var body: some View {
         HStack(spacing: 8 * scale) {
-            Rectangle()
-                .fill(accent)
-                .frame(width: max(5 * scale, 3))
             ChannelLogoView(channel: channel, size: 34 * scale)
+                .padding(.leading, 6 * scale)
             VStack(alignment: .leading, spacing: 0) {
                 Text("\(channel.number)")
                     .font(Theme.mono(14 * scale, weight: .medium))
