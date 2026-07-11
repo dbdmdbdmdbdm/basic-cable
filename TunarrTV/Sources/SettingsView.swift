@@ -155,6 +155,17 @@ struct SettingsView: View {
             Text("WEATHER DATA BY OPEN-METEO.COM (CC BY 4.0)")
                 .font(Theme.mono(15 * uiScale, weight: .medium))
                 .foregroundColor(Theme.dimText)
+            #if os(iOS)
+            Link("ENJOYING IT? BUY ME A COFFEE",
+                 destination: URL(string: "https://buymeacoffee.com/dbdmdbdmdbdm")!)
+                .font(Theme.mono(15 * uiScale, weight: .medium))
+                .foregroundColor(Color(red: 0.95, green: 0.78, blue: 0.12))
+            #else
+            // No browser on tvOS — just show the address.
+            Text("ENJOYING IT? BUYMEACOFFEE.COM/DBDMDBDMDBDM")
+                .font(Theme.mono(15 * uiScale, weight: .medium))
+                .foregroundColor(Color(red: 0.95, green: 0.78, blue: 0.12))
+            #endif
         }
         .padding(.top, 24)
         .multilineTextAlignment(.center)
