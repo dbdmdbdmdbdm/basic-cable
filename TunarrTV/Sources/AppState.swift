@@ -56,9 +56,10 @@ final class AppState: ObservableObject {
     @Published var mediaPlayerEntities: String {
         didSet { persist(mediaPlayerEntities, forKey: "mediaPlayerEntities") }
     }
-    /// Channels with the bottom ticker turned on (toggled from the player).
-    @Published var tickerChannelIds: Set<String> {
-        didSet { persist(tickerChannelIds.sorted().joined(separator: ","), forKey: "tickerChannels") }
+    /// The bottom ticker, global across every channel — flip it on from
+    /// the player and it rides along while zapping until turned off.
+    @Published var tickerEnabled: Bool {
+        didSet { persist(tickerEnabled ? "true" : "false", forKey: "tickerEnabled") }
     }
     /// Album feeding the photos channel; empty = favorites (the default).
     @Published var immichAlbumId: String {
@@ -163,10 +164,6 @@ final class AppState: ObservableObject {
 
     var mediaPlayerIds: [String] { Self.parseEntityList(mediaPlayerEntities) }
 
-    func isTickerEnabled(_ channelId: String) -> Bool {
-        tickerChannelIds.contains(channelId)
-    }
-
     /// Now-playing across the configured media players, deduped.
     func fetchNowPlaying() async -> [HAClient.NowPlayingItem] {
         guard let ha = haClient, !mediaPlayerIds.isEmpty else { return [] }
@@ -259,12 +256,10 @@ final class AppState: ObservableObject {
         immichAlbumId = setting("immichAlbumId")
         immichAlbumName = setting("immichAlbumName")
         mediaPlayerEntities = setting("mediaPlayerEntities")
-        tickerChannelIds = Set(
-            setting("tickerChannels")
-                .split(separator: ",")
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }
-        )
+        // Migrates from the short-lived per-channel set: any channel
+        // enabled means the global ticker starts on.
+        tickerEnabled = setting("tickerEnabled") == "true"
+            || !setting("tickerChannels").isEmpty
         weatherOverlayOnPhotos = setting("weatherOverlayPhotos") == "true"
         weatherOverlayOnCameras = setting("weatherOverlayCameras") == "true"
         windowStart = Self.floorToQuarterHour(Date())
@@ -316,7 +311,7 @@ final class AppState: ObservableObject {
         persist(immichAlbumId, forKey: "immichAlbumId")
         persist(immichAlbumName, forKey: "immichAlbumName")
         persist(mediaPlayerEntities, forKey: "mediaPlayerEntities")
-        persist(tickerChannelIds.sorted().joined(separator: ","), forKey: "tickerChannels")
+        persist(tickerEnabled ? "true" : "false", forKey: "tickerEnabled")
         persist(weatherOverlayOnPhotos ? "true" : "false", forKey: "weatherOverlayPhotos")
         persist(weatherOverlayOnCameras ? "true" : "false", forKey: "weatherOverlayCameras")
     }
@@ -366,11 +361,8 @@ final class AppState: ObservableObject {
                 lineupChanged = true
             case "mediaPlayerEntities" where value != mediaPlayerEntities:
                 mediaPlayerEntities = value
-            case "tickerChannels":
-                let ids = Set(value.split(separator: ",")
-                    .map { $0.trimmingCharacters(in: .whitespaces) }
-                    .filter { !$0.isEmpty })
-                if ids != tickerChannelIds { tickerChannelIds = ids }
+            case "tickerEnabled":
+                tickerEnabled = value == "true"
             case "immichAlbumId" where value != immichAlbumId:
                 immichAlbumId = value
             case "immichAlbumName" where value != immichAlbumName:
@@ -708,8 +700,8 @@ final class AppState: ObservableObject {
         tunedChannel = channel
         isPaused = false
         UserDefaults.standard.set(channel.id, forKey: "lastChannelId")
-        // The ticker shows weather on any channel it's enabled for.
-        if isTickerEnabled(channel.id) {
+        // The ticker shows weather on whatever channel is tuned.
+        if tickerEnabled {
             Task { await refreshWeather() }
         }
         if Self.isSyntheticChannel(channel.id) {

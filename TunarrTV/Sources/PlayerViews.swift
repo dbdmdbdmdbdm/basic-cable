@@ -53,7 +53,7 @@ struct FullscreenPlayerView: View {
                 }
             }
 
-            if let channel = state.tunedChannel, state.isTickerEnabled(channel.id) {
+            if state.tickerEnabled {
                 VStack {
                     Spacer()
                     ChannelTickerView()
@@ -134,8 +134,8 @@ struct FullscreenPlayerView: View {
                 Text("CH \(channel.number) · \(channel.name.uppercased())")
                     .font(Theme.mono(22))
                     .foregroundColor(Theme.dimText)
-                Toggle(isOn: tickerBinding(channel.id)) {
-                    Text("BOTTOM TICKER ON THIS CHANNEL")
+                Toggle(isOn: tickerBinding()) {
+                    Text("BOTTOM TICKER (ALL CHANNELS)")
                         .font(Theme.mono(24, weight: .medium))
                 }
                 .focused($panelFocused)
@@ -159,16 +159,12 @@ struct FullscreenPlayerView: View {
         focused = true
     }
 
-    private func tickerBinding(_ channelId: String) -> Binding<Bool> {
+    private func tickerBinding() -> Binding<Bool> {
         Binding(
-            get: { state.tickerChannelIds.contains(channelId) },
+            get: { state.tickerEnabled },
             set: { on in
-                if on {
-                    state.tickerChannelIds.insert(channelId)
-                    Task { await state.refreshWeather() }
-                } else {
-                    state.tickerChannelIds.remove(channelId)
-                }
+                state.tickerEnabled = on
+                if on { Task { await state.refreshWeather() } }
             }
         )
     }

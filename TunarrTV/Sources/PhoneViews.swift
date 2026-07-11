@@ -119,7 +119,7 @@ struct FullscreenPlayerIOS: View {
                         }
                 )
 
-            if let channel = state.tunedChannel, state.isTickerEnabled(channel.id) {
+            if state.tickerEnabled {
                 VStack {
                     Spacer()
                     ChannelTickerView(compact: true)
@@ -156,26 +156,22 @@ struct FullscreenPlayerIOS: View {
                     .cornerRadius(6)
                 }
                 Spacer()
-                if let channel = state.tunedChannel {
-                    Button {
-                        if state.tickerChannelIds.contains(channel.id) {
-                            state.tickerChannelIds.remove(channel.id)
-                        } else {
-                            state.tickerChannelIds.insert(channel.id)
-                            Task { await state.refreshWeather() }
-                        }
-                        scheduleHide()
-                    } label: {
-                        Image(systemName: "rectangle.bottomthird.inset.filled")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(state.tickerChannelIds.contains(channel.id) ? Theme.onAir : .white)
-                            .frame(width: 48, height: 48)
-                            .background(Color.black.opacity(0.6))
-                            .clipShape(Circle())
-                            .contentShape(Circle())
+                Button {
+                    state.tickerEnabled.toggle()
+                    if state.tickerEnabled {
+                        Task { await state.refreshWeather() }
                     }
-                    .buttonStyle(.plain)
+                    scheduleHide()
+                } label: {
+                    Image(systemName: "rectangle.bottomthird.inset.filled")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(state.tickerEnabled ? Theme.onAir : .white)
+                        .frame(width: 48, height: 48)
+                        .background(Color.black.opacity(0.6))
+                        .clipShape(Circle())
+                        .contentShape(Circle())
                 }
+                .buttonStyle(.plain)
                 Button {
                     state.isFullscreen = false
                 } label: {
