@@ -10,8 +10,10 @@ services:
       # profile page). Put it in a .env file next to this compose file:
       #   HA_TOKEN=eyJhbGciOi...
       - HA_TOKEN=${HA_TOKEN}
-      # Path of the dashboard to show, as seen in your browser's URL bar.
-      - DASH_PATH=/lovelace/0
+      # Dashboard path(s) as seen in your browser's URL bar. One or more,
+      # comma-separated — the first serves at /latest.png, the second at
+      # /latest/1.png, and so on.
+      - DASH_PATHS=/lovelace/0
       - INTERVAL_SECONDS=10
       - WIDTH=1920
       - HEIGHT=1080

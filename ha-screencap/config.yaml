@@ -1,0 +1,35 @@
+name: Basic Cable Screencap
+version: "1.1.0"
+slug: ha_screencap
+description: Serves PNG snapshots of your dashboards for the Basic Cable app's Home Dashboard channels
+url: https://github.com/dbdmdbdmdbdm/basic-cable
+arch:
+  - amd64
+  - aarch64
+init: false
+startup: services
+boot: auto
+ports:
+  8080/tcp: 8090
+ports_description:
+  8080/tcp: Snapshot server (/latest.png, /latest/<n>.png, /healthz)
+options:
+  token: ""
+  dash_paths:
+    - /lovelace/0
+  interval_seconds: 10
+  width: 1920
+  height: 1080
+  dark_mode: true
+  reload_minutes: 60
+  ha_url: http://homeassistant:8123
+schema:
+  token: password
+  dash_paths:
+    - str
+  interval_seconds: int(3,300)
+  width: int(480,3840)
+  height: int(320,2160)
+  dark_mode: bool
+  reload_minutes: int(1,1440)
+  ha_url: url

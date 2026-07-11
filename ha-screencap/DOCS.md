@@ -1,0 +1,47 @@
+# Basic Cable Screencap
+
+Renders one or more Home Assistant dashboards in headless Chromium and
+serves rolling PNG snapshots. Built for the Basic Cable app's **Home
+Dashboard channels** — tvOS has no web engine, so this add-on runs the
+browser and the app just shows the pixels.
+
+## Setup
+
+1. Create a **long-lived access token**: your HA profile → Security →
+   Long-lived access tokens. Paste it into the `token` option.
+2. List the dashboards to capture under `dash_paths` — the path part of
+   the dashboard URL, e.g. `/lovelace/0` or `/dashboard-family/tv`.
+3. Start the add-on, then check `http://<ha-host>:8090/latest.png`.
+
+Each path is served in order: the first at `/latest.png` (also
+`/latest/0.png`), the second at `/latest/1.png`, and so on.
+`/healthz` reports the age of every capture.
+
+In the Basic Cable app's settings, put those URLs in the Home Dashboard
+channel field, comma-separated, optionally named:
+
+```
+http://<ha-host>:8090/latest.png, Kitchen=http://<ha-host>:8090/latest/1.png
+```
+
+## Options
+
+| Option | Meaning |
+|---|---|
+| `token` | Long-lived access token used to log the browser into HA |
+| `dash_paths` | List of dashboard paths to capture |
+| `interval_seconds` | Idle time between capture rounds (per-dashboard refresh is this plus a few seconds of navigation per extra dashboard) |
+| `width` / `height` | Capture resolution |
+| `dark_mode` | Render with the dark color scheme |
+| `reload_minutes` | Full page reload cadence (single-dashboard mode only) |
+| `ha_url` | How the browser reaches HA — the default `http://homeassistant:8123` works on HA OS |
+
+## Notes
+
+- With several dashboards, one browser page cycles through them, so each
+  refreshes roughly every `interval + 5s × dashboards`. Snappy enough
+  for status dashboards; not meant for video.
+- The header and sidebar are hidden automatically so the capture is just
+  the dashboard. If an HA frontend update changes its internals, you may
+  temporarily get them back in frame — update the add-on.
+- Memory: Chromium typically uses 300–500 MB.

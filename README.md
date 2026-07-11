@@ -16,13 +16,15 @@
 - Full-screen viewing with channel up/down zapping and a retro channel banner
 - Guide paging in 30-minute steps, ~12 hours of schedule ahead
 - Built-in **weather channel** (channel 999) with a retro "Local on the 8s" style display
-- Optional **Home Assistant dashboard channel** (channel 998) via the bundled [ha-screencap](companion/ha-screencap) companion container
-- Optional **photos channel** (channel 997): a slideshow of your [Immich](https://immich.app) favorites with crossfades and a slow Ken Burns drift
+- Optional **Home Assistant dashboard channels** (998, extras from 996 down) via the bundled [ha-screencap](ha-screencap) Home Assistant add-on / Docker container
+- Optional **photos channel** (channel 997): a slideshow of your [Immich](https://immich.app) favorites with crossfades, a slow Ken Burns drift, side-by-side portrait pairs, and an "on this day"-flavored rotation
+- Optional **security cameras channel** (channel 951): every Home Assistant camera live at once in a retro CCTV wall — full-motion HLS straight from HA, no transcoding
+- All of the above work **with or without Tunarr** — leave the server URL blank and the app runs on just the built-in channels
 - No account, no tracking, no dependencies — one small SwiftUI app talking to your own server
 
 ## Requirements
 
-- **A running Tunarr server** (tested against Tunarr 1.3.x) reachable from your Apple TV over the network. Channels should use Tunarr's default **HLS** stream mode.
+- **A running Tunarr server, optionally** (tested against Tunarr 1.3.x) reachable from your Apple TV over the network. Channels should use Tunarr's default **HLS** stream mode. No Tunarr? Use the "NO TUNARR? USE JUST THE BUILT-IN CHANNELS" path on first run — weather, dashboards, photos, and cameras all work standalone.
 - **Apple TV** running tvOS 17 or later (or the tvOS Simulator), and/or an **iPhone/iPad** on iOS 17+ (target `TunarrTViOS` — same retro guide in a touch layout: tap a channel to tune, tap the tuned channel or the video preview for fullscreen, on-screen chevrons to zap).
 - To build: a Mac with **Xcode 15+** and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
 
@@ -65,9 +67,22 @@ Without any of this configured, the weather channel shows a "set location in set
 
 ## The Home Assistant dashboard channel
 
-Channel **998 HOME** shows one of your Home Assistant dashboards as a TV channel. tvOS has no web engine, so the app can't load the dashboard itself — instead, the small [ha-screencap](companion/ha-screencap) container runs headless Chromium on your network, screenshots the dashboard every few seconds, and the app displays the latest frame. See [companion/ha-screencap/README.md](companion/ha-screencap/README.md) for a two-minute setup; then point **SNAPSHOT URL** in Settings at its `/latest.png` endpoint. The channel only appears in the guide once the URL is configured.
+Channel **998 HOME** — and as many more as you like, extras numbered down from 996 — shows your Home Assistant dashboards as TV channels. tvOS has no web engine, so the app can't load a dashboard itself — instead, **ha-screencap** runs headless Chromium on your network, screenshots the dashboards every few seconds, and the app displays the latest frames.
+
+Two ways to run ha-screencap:
+
+- **Home Assistant add-on** (easiest on HA OS): *Settings → Add-ons → Add-on Store → ⋮ → Repositories*, add `https://github.com/dbdmdbdmdbdm/basic-cable`, install **Basic Cable Screencap**, paste a long-lived token, and list your dashboard paths. Snapshots serve at `http://<ha-host>:8090/latest.png`, `/latest/1.png`, … — see [ha-screencap/DOCS.md](ha-screencap/DOCS.md).
+- **Docker container** on any box: see [companion/ha-screencap/README.md](companion/ha-screencap/README.md).
+
+Then enter the snapshot URLs in Settings, comma-separated and optionally named (`Kitchen=http://…/latest/1.png`) — each becomes its own channel. They only appear in the guide once configured, and the TEST button fetches every URL and previews the first frame.
 
 Tip: if the dashboard you capture has camera cards, set them to `camera_view: auto` (stills) — at a 10-second snapshot cadence, `live` mode looks identical but keeps the capture container decoding video around the clock.
+
+## The security cameras channel
+
+Channel **951 SECURITY** shows every configured Home Assistant camera at once — a retro CCTV monitor wall with camera labels, a blinking REC dot, and burned-in timestamps. Enter your camera entity ids in Settings (comma-separated, e.g. `camera.front_door, camera.backyard`); per-camera SHOW toggles control what's on the wall, live.
+
+Streams are full-motion HLS fetched per camera over HA's websocket API (`camera/stream`) — HA proxies each camera's own stream, so there's no transcoding and no meaningful server load. For fast channel joins, enable **stream preload** on the cameras (each camera's settings in HA, or the `preload_stream` camera preference) so HA keeps the streams warm; without it every tile waits out HA's cold stream spin-up. The TEST button in Settings verifies each entity and exercises the real stream path.
 
 ## The photos channel
 
