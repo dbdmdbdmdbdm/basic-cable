@@ -44,7 +44,7 @@ Everything the app does is three plain HTTP calls against that base URL:
 
 Notes:
 
-- **Plain HTTP is fine.** The app enables an App Transport Security exception (`NSAllowsArbitraryLoads`) because most Tunarr servers run HTTP on a LAN. HTTPS URLs work too.
+- **Plain HTTP is fine on your LAN.** The app sets the `NSAllowsLocalNetworking` App Transport Security exception, so cleartext HTTP works to private/LAN addresses (RFC-1918 IPs, link-local, and `.local` names) — where most Tunarr servers live. HTTPS URLs work anywhere. If you reach your server via a custom local hostname (e.g. `http://tunarr.home`), use its IP address or HTTPS instead, since ATS still enforces HTTPS for non-`.local` hostnames.
 - **No authentication.** Tunarr currently has no auth, so the app sends none. Don't expose your Tunarr server to the internet; if you want out-of-home access, use a VPN (WireGuard/Tailscale).
 - **Channel-change latency.** Tuning a channel takes roughly 10–15 seconds while Tunarr spins up the ffmpeg session server-side (a "TUNING" indicator shows during this). This is the same latency any Tunarr client has, including Plex.
 - The app is read-only against Tunarr — it never modifies your server's channels or settings.
@@ -141,7 +141,7 @@ With a paid Apple Developer account the install is valid for about a year; with 
 
 ## Project layout
 
-- `project.yml` — XcodeGen spec (tvOS 17+, ATS exception for HTTP)
+- `project.yml` — XcodeGen spec (tvOS 17+, ATS local-networking exception for HTTP on the LAN)
 - `TunarrTV/Sources/`
   - `TunarrClient.swift` — the three Tunarr REST calls
   - `Models.swift` — channel/guide models, defensive JSON decoding
