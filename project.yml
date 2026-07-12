@@ -43,7 +43,7 @@ targets:
           - Silkscreen-Bold.ttf
           - PressStart2P-Regular.ttf
         NSAppTransportSecurity:
-          NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
         NSLocalNetworkUsageDescription: Connects to your Tunarr server on the local network to stream channels.
         NSLocationWhenInUseUsageDescription: Used to show your local forecast on the weather channel.
     settings:
@@ -87,7 +87,7 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         NSAppTransportSecurity:
-          NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
         NSLocalNetworkUsageDescription: Connects to your Tunarr server on the local network to stream channels.
         NSLocationWhenInUseUsageDescription: Used to show your local forecast on the weather channel.
     settings:
