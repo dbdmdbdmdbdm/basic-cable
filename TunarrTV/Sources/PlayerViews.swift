@@ -50,6 +50,10 @@ struct FullscreenPlayerView: View {
                     TuningIndicator(channel: channel)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .ignoresSafeArea()
+                } else if let trouble = state.streamTrouble, let channel = state.tunedChannel {
+                    StreamTroubleIndicator(channel: channel, trouble: trouble)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .ignoresSafeArea()
                 }
             }
 

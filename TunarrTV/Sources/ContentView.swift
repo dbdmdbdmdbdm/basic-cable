@@ -85,6 +85,8 @@ struct ContentView: View {
                     PlayerLayerView(player: state.player)
                     if state.isBuffering, let channel = state.tunedChannel {
                         TuningIndicator(channel: channel)
+                    } else if let trouble = state.streamTrouble, let channel = state.tunedChannel {
+                        StreamTroubleIndicator(channel: channel, trouble: trouble)
                     }
                 }
             }
@@ -127,6 +129,8 @@ struct MiniPlayerPreview: View {
                 PlayerLayerView(player: state.player)
                 if state.isBuffering, let channel = state.tunedChannel {
                     TuningIndicator(channel: channel)
+                } else if let trouble = state.streamTrouble, let channel = state.tunedChannel {
+                    StreamTroubleIndicator(channel: channel, trouble: trouble)
                 }
             }
         }
@@ -183,6 +187,53 @@ struct OfflineBanner: View {
         .background(Theme.accent)
         .cornerRadius(8)
         .shadow(color: .black.opacity(0.5), radius: 8, y: 2)
+    }
+}
+
+/// Shown once tune retries exhaust: names the failure instead of leaving
+/// dead air. "Server busy" (API up, stream won't start — overloaded or a
+/// bad source file) reads very differently from "server unreachable".
+struct StreamTroubleIndicator: View {
+    let channel: Channel
+    let trouble: AppState.StreamTrouble
+
+    var body: some View {
+        ZStack {
+            TVStaticView()
+            VStack(spacing: 10) {
+                Text(trouble == .busy ? "SERVER BUSY" : "NO SIGNAL")
+                    .font(Theme.mono(24))
+                    .foregroundColor(Theme.accent)
+                Text(detail)
+                    .font(Theme.mono(17, weight: .medium))
+                    .foregroundColor(Theme.dimText)
+                    .multilineTextAlignment(.center)
+                Text(hint)
+                    .font(Theme.mono(13))
+                    .foregroundColor(Theme.dimText)
+            }
+            .padding(.horizontal, 28)
+            .padding(.vertical, 18)
+            .background(Color.black.opacity(0.65))
+            .cornerRadius(8)
+        }
+    }
+
+    private var detail: String {
+        switch trouble {
+        case .busy:
+            return "CH \(channel.number) WON'T START — SERVER OVERLOADED OR BAD SOURCE"
+        case .unreachable:
+            return "CAN'T REACH THE TUNARR SERVER"
+        }
+    }
+
+    private var hint: String {
+        #if os(tvOS)
+        return "PLAY/PAUSE TO RETRY · UP/DOWN FOR ANOTHER CHANNEL"
+        #else
+        return "PICK ANOTHER CHANNEL OR RETRY FROM THE GUIDE"
+        #endif
     }
 }
 

@@ -92,6 +92,9 @@ struct FullscreenPlayerIOS: View {
                 if state.isBuffering, let channel = state.tunedChannel {
                     TuningIndicator(channel: channel)
                         .ignoresSafeArea()
+                } else if let trouble = state.streamTrouble, let channel = state.tunedChannel {
+                    StreamTroubleIndicator(channel: channel, trouble: trouble)
+                        .ignoresSafeArea()
                 }
             }
 

@@ -100,6 +100,10 @@ final class AppState: ObservableObject {
     @Published var loadError: String?
     @Published var isBuffering = false
     @Published var isServerReachable = true
+    /// Set once tune retries exhaust: names WHY the channel won't start so
+    /// the static screen can say "server busy" instead of leaving dead air.
+    enum StreamTrouble { case unreachable, busy }
+    @Published var streamTrouble: StreamTrouble?
     /// Demo mode: canned lineup + bundled looping clips, no server needed.
     @Published private(set) var isDemoMode = false
 
@@ -816,7 +820,10 @@ final class AppState: ObservableObject {
     // MARK: - Tuning
 
     func tune(_ channel: Channel, isRetry: Bool = false) {
-        if !isRetry { retryCount = 0 }
+        if !isRetry {
+            retryCount = 0
+            streamTrouble = nil
+        }
         bufferingSince = nil
         let previous = tunedChannel
         tunedChannel = channel
@@ -915,6 +922,7 @@ final class AppState: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] status in
                 if status == .failed { self?.retryTune() }
+                if status == .readyToPlay { self?.streamTrouble = nil }
             }
         player.replaceCurrentItem(with: item)
         player.playImmediately(atRate: 1.0)
@@ -940,14 +948,33 @@ final class AppState: ObservableObject {
 
     private func retryTune() {
         guard let channel = tunedChannel,
-              !Self.isSyntheticChannel(channel.id),
-              retryCount < 3 else { return }
+              !Self.isSyntheticChannel(channel.id) else { return }
+        guard retryCount < 3 else {
+            diagnoseStreamTrouble()
+            return
+        }
         retryCount += 1
         let target = channel
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             guard let self, self.tunedChannel?.id == target.id else { return }
             self.tune(target, isRetry: true)
+        }
+    }
+
+    /// Retries exhausted — probe the server so the static screen can name
+    /// the failure. API answering but the stream never starting is the
+    /// overload/bad-source signature (established streams keep playing
+    /// while every NEW transcode fails, which otherwise looks senseless).
+    private func diagnoseStreamTrouble() {
+        Task { [weak self] in
+            guard let self, let client = self.client else { return }
+            let apiUp = (try? await client.fetchVersion()) != nil
+            await MainActor.run {
+                guard let channel = self.tunedChannel,
+                      !Self.isSyntheticChannel(channel.id) else { return }
+                self.streamTrouble = apiUp ? .busy : .unreachable
+            }
         }
     }
 
@@ -1000,6 +1027,11 @@ final class AppState: ObservableObject {
     }
 
     func togglePause() {
+        // On the trouble screen, play/pause means "try again", not pause.
+        if streamTrouble != nil, let channel = tunedChannel {
+            tune(channel)
+            return
+        }
         if isPaused {
             player.play()
         } else {
