@@ -177,6 +177,11 @@ struct CamerasSceneView: View {
                 CameraTileView(entityId: entityId, index: index, compact: !isFocus)
                     .frame(width: isFocus ? bigWidth : stripWidth,
                            height: isFocus ? size.height : slotHeight)
+                    #if os(iOS)
+                    // Tap a filmstrip thumbnail to focus it (iOS/iPad).
+                    .contentShape(Rectangle())
+                    .onTapGesture { if !isFocus { state.cameraSpotlightFocus(index) } }
+                    #endif
                     .position(
                         x: isFocus ? bigWidth / 2 : bigWidth + stripWidth / 2,
                         y: isFocus ? size.height / 2 : slotHeight * (CGFloat(stripSlot) + 0.5)

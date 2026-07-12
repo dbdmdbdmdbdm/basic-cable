@@ -80,6 +80,7 @@ struct FullscreenPlayerIOS: View {
     @State private var hideTask: Task<Void, Never>?
 
     var body: some View {
+        GeometryReader { geo in
         ZStack {
             Color.black.ignoresSafeArea()
 
@@ -98,38 +99,45 @@ struct FullscreenPlayerIOS: View {
                 }
             }
 
-            // Tap layer sits under the controls so buttons always win taps.
-            Color.clear
-                .contentShape(Rectangle())
-                .ignoresSafeArea()
-                .onTapGesture {
-                    withAnimation { showControls.toggle() }
-                    if showControls { scheduleHide() }
-                }
-                // Swipe up/down anywhere to zap channels.
-                .gesture(
-                    DragGesture(minimumDistance: 40)
-                        .onEnded { value in
-                            let dx = value.translation.width
-                            let dy = value.translation.height
-                            // Cameras: a horizontal swipe walks the spotlight
-                            // through the bank (entering it from the grid).
-                            if state.isCamerasTuned, abs(dx) > abs(dy), abs(dx) > 60 {
-                                state.cameraSpotlightMove(dx < 0 ? 1 : -1)
+            // Tap + swipe layer, under the controls. On the cameras channel in
+            // spotlight it stops short of the filmstrip, so a tap on a thumbnail
+            // falls through to it (tap-to-focus) instead of toggling controls.
+            let camStripWidth = (state.isCamerasTuned && state.cameraSpotlight != nil)
+                ? min(max(geo.size.width * 0.2, 160), 360) : 0
+            HStack(spacing: 0) {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        withAnimation { showControls.toggle() }
+                        if showControls { scheduleHide() }
+                    }
+                    // Swipe up/down to zap; on cameras, left/right walks the spotlight.
+                    .gesture(
+                        DragGesture(minimumDistance: 40)
+                            .onEnded { value in
+                                let dx = value.translation.width
+                                let dy = value.translation.height
+                                if state.isCamerasTuned, abs(dx) > abs(dy), abs(dx) > 60 {
+                                    state.cameraSpotlightMove(dx < 0 ? 1 : -1)
+                                    withAnimation { showControls = true }
+                                    scheduleHide()
+                                    return
+                                }
+                                guard abs(dy) > 60, abs(dy) > abs(dx) else { return }
+                                if dy < 0 {
+                                    state.channelUp()
+                                } else {
+                                    state.channelDown()
+                                }
                                 withAnimation { showControls = true }
                                 scheduleHide()
-                                return
                             }
-                            guard abs(dy) > 60, abs(dy) > abs(dx) else { return }
-                            if dy < 0 {
-                                state.channelUp()
-                            } else {
-                                state.channelDown()
-                            }
-                            withAnimation { showControls = true }
-                            scheduleHide()
-                        }
-                )
+                    )
+                if camStripWidth > 0 {
+                    Color.clear.frame(width: camStripWidth).allowsHitTesting(false)
+                }
+            }
+            .ignoresSafeArea()
 
             // Content stays within the safe area (rounded corners, home
             // indicator would clip it); the bar's background still bleeds
@@ -144,6 +152,8 @@ struct FullscreenPlayerIOS: View {
             if showControls {
                 controls
             }
+        }
+        .ignoresSafeArea()
         }
         .statusBarHidden()
         .persistentSystemOverlays(.hidden)
