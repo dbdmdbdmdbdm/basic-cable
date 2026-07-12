@@ -2,3 +2,10 @@ TunarrTV.xcodeproj/
 .DS_Store
 build/
 DerivedData/
+
+# Signing material / secrets (never commit)
+*.p8
+*.p12
+*.mobileprovision
+.env
+.env.*

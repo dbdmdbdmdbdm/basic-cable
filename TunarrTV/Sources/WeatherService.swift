@@ -78,7 +78,7 @@ enum WMO {
 
     static func compass(_ degrees: Double) -> String {
         let dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
-        let index = Int((degrees + 22.5) / 45.0) % 8
+        let index = ((Int((degrees + 22.5) / 45.0)) % 8 + 8) % 8
         return dirs[index]
     }
 

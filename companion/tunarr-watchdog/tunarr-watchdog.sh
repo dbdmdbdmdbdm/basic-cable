@@ -23,6 +23,11 @@
 # Config: environment variables, or /etc/tunarr-watchdog.conf (sourced).
 # Requires: bash, curl, python3, docker CLI access to the Tunarr container.
 
+# Catch typos/unset-variable bugs. Deliberately NOT -e/pipefail: this is a
+# monitoring loop that must survive individual command failures, and every
+# tunable is read with a ${VAR:-default} fallback so -u stays satisfied.
+set -u
+
 [ -f /etc/tunarr-watchdog.conf ] && . /etc/tunarr-watchdog.conf
 
 TUNARR_URL=${TUNARR_URL:-http://localhost:8000}
@@ -151,8 +156,19 @@ if [ "$SESS_OK" = "1" ] && [ -n "$FF_MAP" ]; then
 
   if [ -n "$ZOMBIE_PIDS" ]; then
     if [ "$ZOMBIE_KILL" = "1" ]; then
-      logit "ZOMBIE-KILL: $ZOMBIE_DESC-> kill -9$ZOMBIE_PIDS"
-      kill -9 $ZOMBIE_PIDS 2>>"$LOG"
+      logit "ZOMBIE-KILL: $ZOMBIE_DESC-> TERM then KILL$ZOMBIE_PIDS"
+      # NOTE: PID-reuse race — these PIDs were snapshotted from ps earlier
+      # this pass, so a PID could in theory have been recycled by now. We
+      # only have PIDs at this site (not stream ids), so we can't use the
+      # race-safe `pkill -9 -f "stream_<id>"` form the diag script uses.
+      # Send TERM first so ffmpeg can flush and close its current HLS
+      # segment, then KILL only the stragglers — a SIGKILL mid-write
+      # truncates the last segment and briefly corrupts the live stream.
+      kill -TERM $ZOMBIE_PIDS 2>>"$LOG"
+      sleep 2
+      for zp in $ZOMBIE_PIDS; do
+        kill -0 "$zp" 2>/dev/null && kill -9 "$zp" 2>>"$LOG"
+      done
       echo "$(ts) ZOMBIE-KILLED $ZOMBIE_DESC" >> "$FAIL_LOG"
       notify "Tunarr zombies killed" "Killed orphan ffmpeg with no viewer: $ZOMBIE_DESC(load5 $LOAD5, ffmpeg was $FF_COUNT)"
     else

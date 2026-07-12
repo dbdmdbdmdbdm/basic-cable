@@ -197,7 +197,9 @@ private struct Marquee<Content: View>: View {
             .fixedSize()
             .background(
                 GeometryReader { geo in
-                    Color.clear.onAppear { contentWidth = geo.size.width }
+                    Color.clear
+                        .onAppear { contentWidth = geo.size.width }
+                        .onChange(of: geo.size.width) { _, width in contentWidth = width }
                 }
             )
     }

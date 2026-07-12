@@ -4,6 +4,11 @@
 const http = require('http');
 const puppeteer = require('puppeteer-core');
 
+// Process-level safety nets: never let a stray rejection/exception take the
+// process down silently. Log clearly and keep serving.
+process.on('unhandledRejection', (e) => console.error('unhandledRejection', e));
+process.on('uncaughtException', (e) => console.error('uncaughtException', e));
+
 const HA_URL = (process.env.HA_URL || '').replace(/\/$/, '');
 const HA_TOKEN = process.env.HA_TOKEN || '';
 // One or more dashboard paths (comma-separated DASH_PATHS, or the legacy
@@ -121,9 +126,25 @@ async function newPage(browser) {
     } catch (e) {
       console.error(`page setup failed (attempt ${attempt}): ${e.message}`);
       try { await page.close(); } catch (_) { /* already gone */ }
+      // If the *browser process* itself has died/disconnected, retrying a
+      // dead handle here would loop forever and never relaunch Chromium.
+      // Rethrow so control returns to captureLoop, whose `finally` closes
+      // the browser and the outer `for(;;)` launches a fresh one. Transient
+      // page-level errors (browser still alive) keep retrying as before.
+      if (!browserConnected(browser)) {
+        throw new Error(`browser disconnected during page setup: ${e.message}`);
+      }
       await sleep(Math.min(60000, attempt * 5000));
     }
   }
+}
+
+// Puppeteer exposes connectivity as a `connected` getter on newer builds and
+// an `isConnected()` method on older ones — check whichever exists.
+function browserConnected(browser) {
+  if (typeof browser.connected === 'boolean') return browser.connected;
+  if (typeof browser.isConnected === 'function') return browser.isConnected();
+  return true; // unknown API shape — assume alive rather than thrash
 }
 
 // Best-effort: hide the HA header + sidebar inside the shadow DOM so the
@@ -426,8 +447,47 @@ document.getElementById('save').onclick = async () => {
 init();
 </script></body></html>`.replace('__FIELDS__', JSON.stringify(CONFIG_FIELDS));
 
+// Anti-DNS-rebinding Host allowlist. A malicious web page can point its own
+// domain (attacker.com) at this add-on's LAN IP:port and have the victim's
+// browser make same-origin requests to us. Blocking that is a matter of
+// rejecting any Host header that is a real DNS name: legitimate access is
+// either through HA ingress (authenticated — carries X-Ingress-Path) or
+// direct to a literal IP / localhost / *.local address.
+function hostAllowed(req) {
+  // Ingress requests are already authenticated by HA — always allow.
+  if (req.headers['x-ingress-path']) return true;
+  const host = req.headers.host;
+  if (!host) return true; // no Host header — nothing to rebind
+  // Strip the :port. Bracketed IPv6 (`[::1]:8090`) keeps its colons inside
+  // the brackets, so only split on the final `]:` or a lone trailing `:port`.
+  let hostname = host;
+  if (host[0] === '[') {
+    hostname = host.slice(1, host.indexOf(']')); // literal IPv6 in brackets
+  } else if (host.indexOf(':') !== -1 && host.indexOf(':') === host.lastIndexOf(':')) {
+    hostname = host.slice(0, host.lastIndexOf(':')); // hostname:port
+  }
+  hostname = hostname.toLowerCase();
+  if (hostname === 'localhost' || hostname.endsWith('.local')) return true;
+  if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)) return true; // IPv4
+  if (hostname.indexOf(':') !== -1) return true; // bare/literal IPv6
+  return false; // a real DNS name — reject (rebinding defense)
+}
+
+// True when a request arrived through HA's authenticated ingress (the
+// Supervisor injects X-Ingress-Path). The human admin picker UI is gated on
+// this so it can't be reached on the raw mapped port.
+function ingressOnly(req) {
+  return !!req.headers['x-ingress-path'];
+}
+
 http
   .createServer((req, res) => {
+    // Reject DNS-rebinding attempts before doing anything else.
+    if (!hostAllowed(req)) {
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      res.end('forbidden host');
+      return;
+    }
     if (req.url.startsWith('/healthz')) {
       const dashboards = DASH_PATHS.map((path, i) => ({
         path,
@@ -439,11 +499,21 @@ http
       return;
     }
     if (req.url === '/config' || req.url.startsWith('/config?')) {
+      if (!ingressOnly(req)) {
+        res.writeHead(403, { 'Content-Type': 'text/plain' });
+        res.end('admin UI is only available through the Home Assistant sidebar');
+        return;
+      }
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(CONFIG_PAGE);
       return;
     }
     if (req.url.startsWith('/config/entities')) {
+      if (!ingressOnly(req)) {
+        res.writeHead(403, { 'Content-Type': 'text/plain' });
+        res.end('admin UI is only available through the Home Assistant sidebar');
+        return;
+      }
       fetchEntities()
         .then((list) => {
           res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
@@ -456,6 +526,11 @@ http
       return;
     }
     if (req.url.startsWith('/config/current')) {
+      if (!ingressOnly(req)) {
+        res.writeHead(403, { 'Content-Type': 'text/plain' });
+        res.end('admin UI is only available through the Home Assistant sidebar');
+        return;
+      }
       let opts = {};
       try { opts = readOptions(); } catch (_) { /* no options file */ }
       res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
@@ -508,13 +583,21 @@ http
       return;
     }
     if (req.url.startsWith('/config/save') && req.method === 'POST') {
+      if (!ingressOnly(req)) {
+        res.writeHead(403, { 'Content-Type': 'text/plain' });
+        res.end('admin UI is only available through the Home Assistant sidebar');
+        return;
+      }
       if (!SUPERVISOR_TOKEN) {
         res.writeHead(403, { 'Content-Type': 'text/plain' });
         res.end('not running as a Home Assistant add-on');
         return;
       }
       let body = '';
-      req.on('data', (chunk) => { body += chunk; });
+      req.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > 262144) req.destroy(); // options payload is tiny
+      });
       req.on('end', () => {
         Promise.resolve()
           .then(() => saveConfig(JSON.parse(body)))
@@ -572,6 +655,7 @@ http
     res.writeHead(404);
     res.end();
   })
+  .on('error', (e) => { console.error('server error', e); process.exit(1); })
   .listen(PORT, () => console.log(`serving on :${PORT}`));
 
 // Never die: the HTTP server keeps serving (healthz goes 503, stale
