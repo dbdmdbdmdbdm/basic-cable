@@ -38,44 +38,52 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // (cameras, weather sensors, media players, ticker) are served at
 // /appconfig so the Basic Cable app can be configured from HA instead of
 // on-device. Plain-docker users can point APP_CONFIG_FILE at a JSON file.
+const OPTIONS_PATH = process.env.APP_CONFIG_FILE || '/data/options.json';
+
+// Options may be YAML lists (pre-1.3 schema) or comma-separated strings
+// (current schema — renders label-first in the HA config UI).
+const toList = (value) =>
+  Array.isArray(value)
+    ? value
+    : String(value || '').split(',').map((s) => s.trim()).filter(Boolean);
+
+function readOptions() {
+  return JSON.parse(require('fs').readFileSync(OPTIONS_PATH, 'utf8'));
+}
+
+function buildAppConfig(opts) {
+  if (!opts.app_config_enabled) return null;
+  const dashNames = toList(opts.dash_names);
+  return {
+    // The dashboards this add-on captures become the app's dashboard
+    // channels: index maps to /latest/<index>.png on this same origin,
+    // names come from the parallel dash_names option.
+    dashboards: DASH_PATHS.map((path, index) => ({
+      index,
+      name: dashNames[index] || '',
+    })),
+    cameras: toList(opts.cameras),
+    weather_sensors: toList(opts.weather_sensors),
+    weather_entity: String(opts.weather_entity || '').trim() || null,
+    media_players: toList(opts.media_players),
+    ticker: {
+      scroll: !!opts.ticker_scroll,
+      entities: (opts.ticker_entities || []).map((e) => ({
+        entity: e.entity,
+        name: e.name || null,
+        show_when: e.show_when || null,
+        color: e.color || null,
+        icon: e.icon || null,
+        display: e.display || null,
+      })),
+    },
+  };
+}
+
 let appConfig = null;
 try {
-  const fs = require('fs');
-  const optionsPath = process.env.APP_CONFIG_FILE || '/data/options.json';
-  const opts = JSON.parse(fs.readFileSync(optionsPath, 'utf8'));
-  // Options may be YAML lists (older versions) or comma-separated strings
-  // (current schema — renders label-first in the HA config UI).
-  const toList = (value) =>
-    Array.isArray(value)
-      ? value
-      : String(value || '').split(',').map((s) => s.trim()).filter(Boolean);
-  if (opts.app_config_enabled) {
-    const dashNames = toList(opts.dash_names);
-    appConfig = {
-      // The dashboards this add-on captures become the app's dashboard
-      // channels: index maps to /latest/<index>.png on this same origin,
-      // names come from the parallel dash_names option.
-      dashboards: DASH_PATHS.map((path, index) => ({
-        index,
-        name: dashNames[index] || '',
-      })),
-      cameras: toList(opts.cameras),
-      weather_sensors: toList(opts.weather_sensors),
-      media_players: toList(opts.media_players),
-      ticker: {
-        scroll: !!opts.ticker_scroll,
-        entities: (opts.ticker_entities || []).map((e) => ({
-          entity: e.entity,
-          name: e.name || null,
-          show_when: e.show_when || null,
-          color: e.color || null,
-          icon: e.icon || null,
-          display: e.display || null,
-        })),
-      },
-    };
-    console.log('serving app config at /appconfig');
-  }
+  appConfig = buildAppConfig(readOptions());
+  if (appConfig) console.log('serving app config at /appconfig');
 } catch (_) {
   /* no options file — snapshot-only mode */
 }
@@ -205,6 +213,208 @@ async function captureWith(browser) {
   }
 }
 
+// ---- /config: entity-picker page for the app options ----
+// The HA add-on options page can only render entity lists as text (no
+// entity selectors in Supervisor schemas), so the add-on serves its own
+// picker UI: searchable dropdowns fed from /api/states, saved through the
+// Supervisor API (self options + restart). SUPERVISOR_TOKEN only exists
+// when running as an add-on; plain-docker gets a read-only view.
+const SUPERVISOR_TOKEN = process.env.SUPERVISOR_TOKEN || '';
+
+async function fetchEntities() {
+  const res = await fetch(HA_URL + '/api/states', {
+    headers: { Authorization: `Bearer ${HA_TOKEN}` },
+  });
+  if (!res.ok) throw new Error(`HA /api/states ${res.status}`);
+  const states = await res.json();
+  return states.map((s) => ({
+    id: s.entity_id,
+    name: (s.attributes && s.attributes.friendly_name) || s.entity_id,
+    domain: s.entity_id.split('.')[0],
+  }));
+}
+
+async function supervisorPost(path, body) {
+  const res = await fetch('http://supervisor' + path, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${SUPERVISOR_TOKEN}`, 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) throw new Error(`Supervisor ${path} ${res.status}: ${await res.text()}`);
+}
+
+async function saveConfig(edit) {
+  const isEntity = (v) => typeof v === 'string' && /^[a-z_]+\.[a-z0-9_]+$/.test(v);
+  const listOf = (v) => (Array.isArray(v) ? v.filter(isEntity).join(',') : undefined);
+  // Fresh read so edits made in the classic options page since boot survive.
+  const options = readOptions();
+  for (const key of ['cameras', 'weather_sensors', 'media_players']) {
+    const value = listOf(edit[key]);
+    if (value !== undefined) options[key] = value;
+  }
+  if (typeof edit.weather_entity === 'string') {
+    options.weather_entity = isEntity(edit.weather_entity) ? edit.weather_entity : '';
+  }
+  if (typeof edit.app_config_enabled === 'boolean') {
+    options.app_config_enabled = edit.app_config_enabled;
+  }
+  await supervisorPost('/addons/self/options', { options });
+  // Options only apply on restart; reply reaches the browser first.
+  setTimeout(() => {
+    supervisorPost('/addons/self/restart').catch((e) => console.error(`restart failed: ${e.message}`));
+  }, 1500);
+}
+
+const CONFIG_FIELDS = [
+  { key: 'cameras', title: 'CAMERAS', domains: ['camera'], multi: true,
+    hint: 'Security-cameras channel — list order is the grid order.' },
+  { key: 'weather_sensors', title: 'WEATHER SENSORS', domains: ['sensor'], multi: true,
+    hint: 'Extra "around the house" readings on the weather channel.' },
+  { key: 'weather_entity', title: 'WEATHER FORECAST ENTITY', domains: ['weather'], multi: false,
+    hint: 'Forecast source for the weather channel — replaces Open-Meteo.' },
+  { key: 'media_players', title: 'MEDIA PLAYERS', domains: ['media_player'], multi: true,
+    hint: 'Now-playing sources for the ticker.' },
+];
+
+const CONFIG_PAGE = `<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Basic Cable · App Config</title>
+<style>
+ body{background:#0a0a16;color:#eee;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;margin:0 auto;padding:26px;max-width:860px}
+ h1{font-size:20px;letter-spacing:3px;margin:0 0 4px}
+ p.lead{color:#889;font-size:12px;margin:0 0 18px}
+ .card{background:#131327;border:1px solid #2b2b4d;border-radius:10px;padding:14px 16px;margin:14px 0}
+ .card h2{font-size:13px;letter-spacing:2px;margin:0 0 2px;color:#8fb4ff}
+ .hint{color:#778;font-size:11px;margin:0 0 8px}
+ .chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+ .chip{background:#20204a;border:1px solid #3c3c72;border-radius:6px;padding:4px 8px;font-size:12px;display:flex;gap:7px;align-items:center}
+ .chip small{color:#778}
+ .chip button{background:none;border:none;color:#99a;cursor:pointer;font:inherit;padding:0}
+ .chip button:hover{color:#fff}
+ .menu{position:relative}
+ input[type=text]{width:100%;box-sizing:border-box;background:#0d0d1e;border:1px solid #3c3c72;border-radius:6px;color:#eee;padding:8px 10px;font:inherit;font-size:13px}
+ .opts{position:absolute;left:0;right:0;top:100%;background:#10102a;border:1px solid #3c3c72;border-radius:6px;max-height:230px;overflow:auto;z-index:9;display:none}
+ .opts div{padding:6px 10px;cursor:pointer;font-size:12px}
+ .opts div:hover{background:#22224e}
+ .opts .eid{color:#778;font-size:10px}
+ label.toggle{display:flex;gap:10px;align-items:center;font-size:12px;margin:14px 0;cursor:pointer}
+ #save{background:#c22;border:none;color:#fff;font:inherit;font-size:13px;letter-spacing:2px;padding:12px 26px;border-radius:8px;cursor:pointer}
+ #save:disabled{background:#444;cursor:default}
+ #status{margin-left:12px;font-size:12px;color:#8e8}
+ .ro{color:#c96;font-size:12px;margin:10px 0}
+</style></head><body>
+<h1>BASIC CABLE · APP CONFIG</h1>
+<p class="lead">Entity pickers for the app options — the classic add-on configuration page can only show these as text. Saving updates the add-on options and restarts the add-on (snapshots pause a few seconds). Dashboards, capture and ticker-chip settings stay on the classic page.</p>
+<div id="fields"></div>
+<label class="toggle"><input type="checkbox" id="enabled"> SERVE THIS CONFIG TO THE APP (the app's own settings are overridden while enabled)</label>
+<div class="ro" id="readonly" style="display:none">READ-ONLY: not running as a Home Assistant add-on, so options can't be saved from here. Edit the container env / config file instead.</div>
+<button id="save">SAVE &amp; RESTART</button><span id="status"></span>
+<script>
+const FIELDS = __FIELDS__;
+let entities = [], sel = {}, canSave = false;
+
+function chipRow(key, id, multi, index, count) {
+  const e = entities.find((x) => x.id === id);
+  const chip = document.createElement('div'); chip.className = 'chip';
+  chip.innerHTML = '<span>' + (e ? e.name : id) + ' <small>' + id + '</small></span>';
+  if (multi && count > 1) {
+    for (const [glyph, delta] of [['\\u2039', -1], ['\\u203a', 1]]) {
+      const move = document.createElement('button'); move.textContent = glyph;
+      move.title = 'Reorder'; move.onclick = () => {
+        const j = index + delta;
+        if (j < 0 || j >= count) return;
+        [sel[key][index], sel[key][j]] = [sel[key][j], sel[key][index]];
+        render();
+      };
+      chip.appendChild(move);
+    }
+  }
+  const del = document.createElement('button'); del.textContent = '\\u2715';
+  del.onclick = () => { sel[key].splice(index, 1); render(); };
+  chip.appendChild(del);
+  return chip;
+}
+
+function render() {
+  for (const f of FIELDS) {
+    const box = document.getElementById('chips-' + f.key);
+    box.innerHTML = '';
+    sel[f.key].forEach((id, i) => box.appendChild(chipRow(f.key, id, f.multi, i, sel[f.key].length)));
+    if (!sel[f.key].length) box.innerHTML = '<span class="hint">none</span>';
+  }
+}
+
+function attachSearch(f) {
+  const input = document.getElementById('search-' + f.key);
+  const menu = document.getElementById('opts-' + f.key);
+  const show = () => {
+    const q = input.value.toLowerCase();
+    const hits = entities.filter((e) => f.domains.includes(e.domain)
+      && !sel[f.key].includes(e.id)
+      && (e.id.toLowerCase().includes(q) || e.name.toLowerCase().includes(q))).slice(0, 25);
+    menu.innerHTML = '';
+    for (const e of hits) {
+      const row = document.createElement('div');
+      row.innerHTML = e.name + ' <span class="eid">' + e.id + '</span>';
+      row.onmousedown = () => {
+        if (f.multi) sel[f.key].push(e.id); else sel[f.key] = [e.id];
+        input.value = ''; menu.style.display = 'none'; render();
+      };
+      menu.appendChild(row);
+    }
+    menu.style.display = hits.length ? 'block' : 'none';
+  };
+  input.oninput = show;
+  input.onfocus = show;
+  input.onblur = () => setTimeout(() => { menu.style.display = 'none'; }, 150);
+}
+
+async function init() {
+  const holder = document.getElementById('fields');
+  for (const f of FIELDS) {
+    const card = document.createElement('div'); card.className = 'card';
+    card.innerHTML = '<h2>' + f.title + '</h2><p class="hint">' + f.hint + '</p>'
+      + '<div class="chips" id="chips-' + f.key + '"></div>'
+      + '<div class="menu"><input type="text" id="search-' + f.key
+      + '" placeholder="Search ' + f.domains.join('.') + '.* entities\\u2026" autocomplete="off">'
+      + '<div class="opts" id="opts-' + f.key + '"></div></div>';
+    holder.appendChild(card);
+  }
+  const current = await (await fetch('config/current')).json();
+  canSave = current.can_save;
+  for (const f of FIELDS) sel[f.key] = current[f.key] || [];
+  document.getElementById('enabled').checked = !!current.app_config_enabled;
+  if (!canSave) {
+    document.getElementById('readonly').style.display = 'block';
+    document.getElementById('save').disabled = true;
+  }
+  entities = await (await fetch('config/entities')).json();
+  for (const f of FIELDS) attachSearch(f);
+  render();
+}
+
+document.getElementById('save').onclick = async () => {
+  const status = document.getElementById('status');
+  const body = { app_config_enabled: document.getElementById('enabled').checked };
+  for (const f of FIELDS) body[f.key] = sel[f.key];
+  body.weather_entity = (sel.weather_entity && sel.weather_entity[0]) || '';
+  status.textContent = 'SAVING\\u2026';
+  const res = await fetch('config/save', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!res.ok) { status.textContent = 'SAVE FAILED: ' + await res.text(); return; }
+  status.textContent = 'SAVED \\u2014 RESTARTING ADD-ON\\u2026';
+  // The add-on restarts to apply options; wait for it to come back.
+  await new Promise((r) => setTimeout(r, 6000));
+  for (let i = 0; i < 30; i++) {
+    try { if ((await fetch('healthz')).status < 500) break; } catch (_) {}
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+  status.textContent = 'SAVED \\u2713';
+};
+
+init();
+</script></body></html>`.replace('__FIELDS__', JSON.stringify(CONFIG_FIELDS));
+
 http
   .createServer((req, res) => {
     if (req.url.startsWith('/healthz')) {
@@ -215,6 +425,60 @@ http
       const ok = dashboards.every((d) => d.ageSeconds !== null && d.ageSeconds < STALE_SECONDS);
       res.writeHead(ok ? 200 : 503, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok, dashboards }));
+      return;
+    }
+    if (req.url === '/config' || req.url.startsWith('/config?')) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(CONFIG_PAGE);
+      return;
+    }
+    if (req.url.startsWith('/config/entities')) {
+      fetchEntities()
+        .then((list) => {
+          res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+          res.end(JSON.stringify(list));
+        })
+        .catch((e) => {
+          res.writeHead(502, { 'Content-Type': 'text/plain' });
+          res.end(e.message);
+        });
+      return;
+    }
+    if (req.url.startsWith('/config/current')) {
+      let opts = {};
+      try { opts = readOptions(); } catch (_) { /* no options file */ }
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({
+        cameras: toList(opts.cameras),
+        weather_sensors: toList(opts.weather_sensors),
+        media_players: toList(opts.media_players),
+        weather_entity: toList(opts.weather_entity),
+        app_config_enabled: !!opts.app_config_enabled,
+        can_save: !!SUPERVISOR_TOKEN,
+      }));
+      return;
+    }
+    if (req.url.startsWith('/config/save') && req.method === 'POST') {
+      if (!SUPERVISOR_TOKEN) {
+        res.writeHead(403, { 'Content-Type': 'text/plain' });
+        res.end('not running as a Home Assistant add-on');
+        return;
+      }
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => {
+        Promise.resolve()
+          .then(() => saveConfig(JSON.parse(body)))
+          .then(() => {
+            res.writeHead(200, { 'Content-Type': 'text/plain' });
+            res.end('ok');
+          })
+          .catch((e) => {
+            console.error(`config save failed: ${e.message}`);
+            res.writeHead(500, { 'Content-Type': 'text/plain' });
+            res.end(e.message);
+          });
+      });
       return;
     }
     if (req.url.startsWith('/appconfig')) {

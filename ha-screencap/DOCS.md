@@ -47,7 +47,17 @@ http://<ha-host>:8090/latest.png, Kitchen=http://<ha-host>:8090/latest/1.png
 Set `app_config_enabled: true` and the add-on serves `/appconfig` — the
 Basic Cable app picks it up automatically (via the snapshot URL you
 already configured) and these lists **override** whatever is typed in
-the app's settings, so everything is managed here in HA:
+the app's settings, so everything is managed here in HA.
+
+**Prefer the Web UI for the entity lists**: the add-on's **Open Web UI**
+button (or `http://<ha-host>:8090/config`) is a real entity picker —
+searchable dropdowns for cameras (with grid-order reordering), weather
+sensors, the weather forecast entity, and media players. It exists
+because HA's add-on options page can only render these as text; saving
+from it updates the options below and restarts the add-on. Dashboards,
+capture settings, and ticker chips stay on the classic options page.
+
+The same options in YAML form:
 
 ```yaml
 app_config_enabled: true
@@ -59,6 +69,7 @@ cameras:                       # security channel — list order = grid order
   - camera.backyard
 weather_sensors:               # weather channel "around the house" page
   - sensor.outdoor_temp
+weather_entity: weather.home   # forecast source replacing Open-Meteo (optional)
 media_players:                 # ticker now-playing sources
   - media_player.living_room
 ticker_scroll: false           # true = classic news crawl

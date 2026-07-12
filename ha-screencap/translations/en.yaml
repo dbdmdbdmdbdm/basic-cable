@@ -62,6 +62,12 @@ configuration:
       Comma-separated sensor entities for the weather channel's "around
       the house" readings (for example sensor.outdoor_temp,
       sensor.pool_temp).
+  weather_entity:
+    name: "📺 Basic Cable app · Weather forecast entity"
+    description: >-
+      Optional weather.* entity whose forecast replaces Open-Meteo on the
+      weather channel (for example weather.home). Tip: the add-on's Web UI
+      (Open Web UI button) has real entity pickers for all the 📺 fields.
   media_players:
     name: "📺 Basic Cable app · Ticker now-playing sources"
     description: >-

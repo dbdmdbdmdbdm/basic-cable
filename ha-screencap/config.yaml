@@ -1,8 +1,10 @@
 name: Basic Cable Screencap
-version: "1.3.0"
+version: "1.4.0"
 slug: ha_screencap
 description: Serves PNG snapshots of your dashboards for the Basic Cable app's Home Dashboard channels
 url: https://github.com/dbdmdbdmdbdm/basic-cable
+webui: http://[HOST]:[PORT:8080]/config
+hassio_api: true
 arch:
   - amd64
   - aarch64
@@ -27,6 +29,7 @@ options:
   cameras: ""
   weather_sensors: ""
   media_players: ""
+  weather_entity: ""
   ticker_scroll: false
   ticker_entities: []
 schema:
@@ -43,6 +46,7 @@ schema:
   cameras: str?
   weather_sensors: str?
   media_players: str?
+  weather_entity: str?
   ticker_scroll: bool
   ticker_entities:
     - entity: str
