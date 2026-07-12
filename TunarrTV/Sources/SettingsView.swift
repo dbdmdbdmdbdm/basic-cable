@@ -294,6 +294,12 @@ struct SettingsView: View {
                     .font(Theme.mono(20 * uiScale, weight: .medium))
             }
             caption("Shares these settings (including the Home Assistant token) across your devices through your own iCloud account.")
+
+            Toggle(isOn: $state.haReportNowPlaying) {
+                Text("REPORT NOW PLAYING TO HOME ASSISTANT")
+                    .font(Theme.mono(20 * uiScale, weight: .medium))
+            }
+            caption("Publishes what this device is playing to a Home Assistant sensor (sensor.basic_cable_<device>) — the channel name, number, and program, updated as you tune. Uses the Home Assistant URL and token above. Off by default.")
         }
     }
 

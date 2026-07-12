@@ -202,6 +202,19 @@ struct HAClient {
         case unreachable
     }
 
+    /// Publishes a state to Home Assistant via the REST API (creates or updates
+    /// the entity). Used to report the app's now-playing channel as a sensor.
+    /// Fire-and-forget — a failure just means HA didn't get this update.
+    func setState(entityId: String, state: String, attributes: [String: Any]) async {
+        var request = request(path: "api/states/\(entityId)")
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 8
+        request.httpBody = try? JSONSerialization.data(
+            withJSONObject: ["state": state, "attributes": attributes])
+        _ = try? await URLSession.shared.data(for: request)
+    }
+
     /// One-line identity check for the settings TEST button:
     /// "HA 2026.7 · HOME". 401/403 → bad token; anything else → unreachable.
     func fetchConfigSummary() async throws -> String {

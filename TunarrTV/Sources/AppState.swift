@@ -83,6 +83,14 @@ final class AppState: ObservableObject {
     @Published var weatherOverlayOnCameras: Bool {
         didSet { persist(weatherOverlayOnCameras ? "true" : "false", forKey: "weatherOverlayCameras") }
     }
+    /// Opt-in: publish what this device is playing to Home Assistant as a
+    /// per-device sensor (`sensor.basic_cable_<device>`). Off by default.
+    @Published var haReportNowPlaying: Bool {
+        didSet {
+            persist(haReportNowPlaying ? "true" : "false", forKey: "haReportNowPlaying")
+            reportNowPlayingToHA()
+        }
+    }
     /// Mirror settings through iCloud key-value storage so configuring the
     /// iPhone app configures the Apple TV app (and vice versa).
     @Published var iCloudSyncEnabled: Bool {
@@ -100,7 +108,11 @@ final class AppState: ObservableObject {
     @Published var windowStart: Date
     @Published var now: Date = Date()
     // Launch into fullscreen playing the last channel, like turning on a TV.
-    @Published var isFullscreen = true
+    @Published var isFullscreen = true {
+        didSet {
+            if haReportNowPlaying, isFullscreen != oldValue { reportNowPlayingToHA() }
+        }
+    }
     @Published var showSettings = false
     @Published var isPaused = false
     @Published var loadError: String?
@@ -429,6 +441,7 @@ final class AppState: ObservableObject {
             || !setting("tickerChannels").isEmpty
         weatherOverlayOnPhotos = setting("weatherOverlayPhotos") == "true"
         weatherOverlayOnCameras = setting("weatherOverlayCameras") == "true"
+        haReportNowPlaying = setting("haReportNowPlaying") == "true"
         windowStart = Self.floorToQuarterHour(Date())
 
         NotificationCenter.default.addObserver(
@@ -482,6 +495,7 @@ final class AppState: ObservableObject {
         persist(tickerEnabled ? "true" : "false", forKey: "tickerEnabled")
         persist(weatherOverlayOnPhotos ? "true" : "false", forKey: "weatherOverlayPhotos")
         persist(weatherOverlayOnCameras ? "true" : "false", forKey: "weatherOverlayCameras")
+        persist(haReportNowPlaying ? "true" : "false", forKey: "haReportNowPlaying")
     }
 
     // MARK: - Settings backup / restore / reset
@@ -495,6 +509,7 @@ final class AppState: ObservableObject {
         "hiddenCameras", "dashImageURL", "immichURL", "immichKey",
         "immichAlbumId", "immichAlbumName", "mediaPlayerEntities",
         "tickerEnabled", "weatherOverlayPhotos", "weatherOverlayCameras",
+        "haReportNowPlaying",
     ]
 
     private func applySetting(_ key: String, _ value: String) {
@@ -519,8 +534,54 @@ final class AppState: ObservableObject {
         case "tickerEnabled": tickerEnabled = value == "true"
         case "weatherOverlayPhotos": weatherOverlayOnPhotos = value == "true"
         case "weatherOverlayCameras": weatherOverlayOnCameras = value == "true"
+        case "haReportNowPlaying": haReportNowPlaying = value == "true"
         default: break
         }
+    }
+
+    // MARK: - Now-playing → Home Assistant
+
+    /// Publishes what this device is showing to a per-device HA sensor
+    /// (`sensor.basic_cable_<device>`). Opt-in via `haReportNowPlaying`;
+    /// fire-and-forget, guarded by an HA client being configured.
+    func reportNowPlayingToHA(background: Bool = false) {
+        guard let ha = haClient else { return }
+        let device = UIDevice.current.name
+        let entityId = "sensor.basic_cable_\(Self.entitySlug(device))"
+        var attributes: [String: Any] = [
+            "friendly_name": "Basic Cable (\(device))",
+            "icon": "mdi:television-classic",
+        ]
+        let stateValue: String
+        if background {
+            stateValue = "Idle"; attributes["view"] = "background"
+        } else if !haReportNowPlaying {
+            stateValue = "Off"; attributes["view"] = "off"
+        } else if let channel = tunedChannel {
+            stateValue = channel.name
+            attributes["channel"] = channel.number
+            attributes["view"] = isFullscreen ? "watching" : "guide"
+            if let program = nowPlaying(on: channel)?.title { attributes["program"] = program }
+        } else {
+            stateValue = "Idle"; attributes["view"] = "idle"
+        }
+        Task { await ha.setState(entityId: entityId, state: stateValue, attributes: attributes) }
+    }
+
+    /// Slugifies a device name into a valid HA entity-id suffix ([a-z0-9_]).
+    static func entitySlug(_ name: String) -> String {
+        var slug = ""
+        var pendingUnderscore = false
+        for character in name.lowercased() {
+            if character.isASCII, character.isLetter || character.isNumber {
+                if pendingUnderscore, !slug.isEmpty { slug.append("_") }
+                slug.append(character)
+                pendingUnderscore = false
+            } else {
+                pendingUnderscore = true
+            }
+        }
+        return slug.isEmpty ? "device" : slug
     }
 
     func settingsSnapshot() -> [String: String] {
@@ -1115,6 +1176,7 @@ final class AppState: ObservableObject {
         if tickerEnabled {
             Task { await refreshWeather() }
         }
+        if haReportNowPlaying { reportNowPlayingToHA() }
         if Self.isSyntheticChannel(channel.id) {
             itemFailureWatch = nil
             pendingTune?.cancel()
@@ -1209,6 +1271,7 @@ final class AppState: ObservableObject {
     /// its ffmpeg cleanly. (Explicitly DELETEing the session leaks the
     /// ffmpeg on Tunarr 1.3.8, so we deliberately don't.)
     func appDidEnterBackground() {
+        if haReportNowPlaying { reportNowPlayingToHA(background: true) }
         guard let channel = tunedChannel, !Self.isSyntheticChannel(channel.id), !isDemoMode else { return }
         _ = channel
         pendingTune?.cancel()
@@ -1217,6 +1280,7 @@ final class AppState: ObservableObject {
     }
 
     func appDidBecomeActive() {
+        if haReportNowPlaying { reportNowPlayingToHA() }
         guard let channel = tunedChannel, !Self.isSyntheticChannel(channel.id), !isDemoMode,
               player.currentItem == nil else { return }
         tune(channel, isRetry: true)
