@@ -610,6 +610,10 @@ struct SettingsView: View {
                  destination: URL(string: "https://eff.org/donate")!)
                 .font(Theme.mono(15 * uiScale, weight: .medium))
                 .foregroundColor(Color(red: 0.42, green: 0.72, blue: 0.98))
+            Link("...OR FREE KNOWLEDGE — DONATE TO WIKIPEDIA",
+                 destination: URL(string: "https://donate.wikimedia.org")!)
+                .font(Theme.mono(15 * uiScale, weight: .medium))
+                .foregroundColor(Color(white: 0.75))
             #else
             // No browser on tvOS — just show the addresses.
             Text("ENJOYING IT? BUYMEACOFFEE.COM/DBDMDBDMDBDM")
@@ -618,6 +622,9 @@ struct SettingsView: View {
             Text("...OR SUPPORT DIGITAL RIGHTS — EFF.ORG/DONATE")
                 .font(Theme.mono(15 * uiScale, weight: .medium))
                 .foregroundColor(Color(red: 0.42, green: 0.72, blue: 0.98))
+            Text("...OR FREE KNOWLEDGE — DONATE.WIKIMEDIA.ORG")
+                .font(Theme.mono(15 * uiScale, weight: .medium))
+                .foregroundColor(Color(white: 0.75))
             #endif
         }
         .padding(.top, 24)

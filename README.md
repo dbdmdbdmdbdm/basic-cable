@@ -1,6 +1,6 @@
 # Basic Cable
 
-> ☕ Enjoying Basic Cable? [Buy me a coffee](https://buymeacoffee.com/dbdmdbdmdbdm) — or, better yet, [donate to the EFF](https://eff.org/donate) to support digital rights.
+> ☕ Enjoying Basic Cable? [Buy me a coffee](https://buymeacoffee.com/dbdmdbdmdbdm) — or, better yet, support [the EFF](https://eff.org/donate) (digital rights) or [Wikipedia](https://donate.wikimedia.org) (free knowledge).
 >
 > 🔍 Want to check that the App Store build matches this source? See [VERIFYING.md](VERIFYING.md).
 
