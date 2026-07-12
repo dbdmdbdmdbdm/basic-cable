@@ -280,28 +280,39 @@ const CONFIG_PAGE = `<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Basic Cable · App Config</title>
 <style>
- body{background:#0a0a16;color:#eee;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;margin:0 auto;padding:26px;max-width:860px}
+ body{background:#0a0a16;color:#eee;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;margin:0 auto;padding:26px;max-width:860px;-webkit-text-size-adjust:100%}
  h1{font-size:20px;letter-spacing:3px;margin:0 0 4px}
  p.lead{color:#889;font-size:12px;margin:0 0 18px}
  .card{background:#131327;border:1px solid #2b2b4d;border-radius:10px;padding:14px 16px;margin:14px 0}
  .card h2{font-size:13px;letter-spacing:2px;margin:0 0 2px;color:#8fb4ff}
  .hint{color:#778;font-size:11px;margin:0 0 8px}
- .chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
- .chip{background:#20204a;border:1px solid #3c3c72;border-radius:6px;padding:4px 8px;font-size:12px;display:flex;gap:7px;align-items:center}
+ .chips{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+ .chip{background:#20204a;border:1px solid #3c3c72;border-radius:8px;padding:8px 10px;font-size:13px;display:flex;gap:4px;align-items:center;max-width:100%}
+ .chip>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
  .chip small{color:#778}
- .chip button{background:none;border:none;color:#99a;cursor:pointer;font:inherit;padding:0}
+ /* Touch targets: 40px+ hit areas so fingers land reliably. */
+ .chip button{background:none;border:none;color:#99a;cursor:pointer;font:inherit;font-size:15px;padding:6px 8px;margin:-6px -2px;min-width:32px}
  .chip button:hover{color:#fff}
  .menu{position:relative}
- input[type=text]{width:100%;box-sizing:border-box;background:#0d0d1e;border:1px solid #3c3c72;border-radius:6px;color:#eee;padding:8px 10px;font:inherit;font-size:13px}
- .opts{position:absolute;left:0;right:0;top:100%;background:#10102a;border:1px solid #3c3c72;border-radius:6px;max-height:230px;overflow:auto;z-index:9;display:none}
- .opts div{padding:6px 10px;cursor:pointer;font-size:12px}
+ /* 16px inputs: anything smaller makes iOS Safari zoom in on focus. */
+ input[type=text]{width:100%;box-sizing:border-box;background:#0d0d1e;border:1px solid #3c3c72;border-radius:8px;color:#eee;padding:12px;font:inherit;font-size:16px}
+ .opts{position:absolute;left:0;right:0;top:100%;background:#10102a;border:1px solid #3c3c72;border-radius:8px;max-height:min(260px,45vh);overflow:auto;z-index:9;display:none}
+ .opts div{padding:11px 12px;cursor:pointer;font-size:14px;border-bottom:1px solid #1c1c38}
  .opts div:hover{background:#22224e}
- .opts .eid{color:#778;font-size:10px}
- label.toggle{display:flex;gap:10px;align-items:center;font-size:12px;margin:14px 0;cursor:pointer}
- #save{background:#c22;border:none;color:#fff;font:inherit;font-size:13px;letter-spacing:2px;padding:12px 26px;border-radius:8px;cursor:pointer}
+ .opts .eid{color:#778;font-size:11px}
+ label.toggle{display:flex;gap:12px;align-items:flex-start;font-size:12px;margin:14px 0;cursor:pointer;line-height:1.5}
+ label.toggle input{width:20px;height:20px;flex:none;margin:0}
+ #save{background:#c22;border:none;color:#fff;font:inherit;font-size:15px;letter-spacing:2px;padding:14px 26px;border-radius:8px;cursor:pointer}
  #save:disabled{background:#444;cursor:default}
- #status{margin-left:12px;font-size:12px;color:#8e8}
+ #status{margin-left:12px;font-size:12px;color:#8e8;display:inline-block;margin-top:8px}
  .ro{color:#c96;font-size:12px;margin:10px 0}
+ @media (max-width:640px){
+  body{padding:14px}
+  h1{font-size:16px;letter-spacing:2px}
+  .card{padding:12px;margin:12px 0}
+  .chip small{display:none} /* friendly name only — ids don't fit a phone */
+  #save{width:100%;padding:16px}
+ }
 </style></head><body>
 <h1>BASIC CABLE · APP CONFIG</h1>
 <p class="lead">Entity pickers for the app options — the classic add-on configuration page can only show these as text. Saving updates the add-on options and restarts the add-on (snapshots pause a few seconds). Dashboards, capture and ticker-chip settings stay on the classic page.</p>
@@ -356,7 +367,7 @@ function attachSearch(f) {
     for (const e of hits) {
       const row = document.createElement('div');
       row.innerHTML = e.name + ' <span class="eid">' + e.id + '</span>';
-      row.onmousedown = () => {
+      row.onpointerdown = () => {
         if (f.multi) sel[f.key].push(e.id); else sel[f.key] = [e.id];
         input.value = ''; menu.style.display = 'none'; render();
       };
@@ -489,6 +500,15 @@ http
       }
       res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
       res.end(JSON.stringify(appConfig));
+      return;
+    }
+    // Through HA Ingress the add-on's root IS the config page — that's
+    // what the sidebar entry opens, with HA's own auth in front. Direct
+    // hits on the mapped port keep serving the first snapshot so
+    // existing app/tile configs don't break.
+    if ((req.url === '/' || req.url.startsWith('/?')) && req.headers['x-ingress-path']) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(CONFIG_PAGE);
       return;
     }
     // /latest.png (first dashboard) or /latest/<index>.png; the bare root

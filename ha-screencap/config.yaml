@@ -1,10 +1,14 @@
 name: Basic Cable Screencap
-version: "1.4.0"
+version: "1.4.1"
 slug: ha_screencap
 description: Serves PNG snapshots of your dashboards for the Basic Cable app's Home Dashboard channels
 url: https://github.com/dbdmdbdmdbdm/basic-cable
 webui: http://[HOST]:[PORT:8080]/config
 hassio_api: true
+ingress: true
+ingress_port: 8080
+panel_icon: mdi:television-classic
+panel_title: Basic Cable
 arch:
   - amd64
   - aarch64
