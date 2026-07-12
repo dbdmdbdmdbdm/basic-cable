@@ -20,12 +20,14 @@
 - Optional **photos channel** (channel 997): a slideshow of your [Immich](https://immich.app) favorites with crossfades, a slow Ken Burns drift, side-by-side portrait pairs, and an "on this day"-flavored rotation
 - Optional **security cameras channel** (channel 951): every Home Assistant camera live at once in a retro CCTV wall — full-motion HLS straight from HA, no transcoding
 - All of the above work **with or without Tunarr** — leave the server URL blank and the app runs on just the built-in channels
+- **AirPlay** — send any channel to an Apple TV or AirPlay 2 receiver from the iPhone/iPad fullscreen controls (Apple's own route picker; no third-party SDK)
+- **Universal** — one app for Apple TV, iPhone, and iPad; iPad gets a two-pane layout (video preview + program info up top, full guide below), close to the Apple TV experience
 - No account, no tracking, no dependencies — one small SwiftUI app talking to your own server
 
 ## Requirements
 
 - **A running Tunarr server, optionally** (tested against Tunarr 1.3.x) reachable from your Apple TV over the network. Channels should use Tunarr's default **HLS** stream mode. No Tunarr? Use the "NO TUNARR? USE JUST THE BUILT-IN CHANNELS" path on first run — weather, dashboards, photos, and cameras all work standalone.
-- **Apple TV** running tvOS 17 or later (or the tvOS Simulator), and/or an **iPhone/iPad** on iOS 17+ (target `TunarrTViOS` — same retro guide in a touch layout: tap a channel to tune, tap the tuned channel or the video preview for fullscreen, on-screen chevrons to zap).
+- **Apple TV** running tvOS 17 or later (or the tvOS Simulator), and/or an **iPhone/iPad** on iOS 17+ (target `TunarrTViOS` — a universal app: iPhone shows the stacked touch guide, iPad shows a two-pane layout closer to the Apple TV screen; tap a channel to tune, tap the tuned channel or the video preview for fullscreen, on-screen chevrons to zap, AirPlay button in the fullscreen controls).
 - To build: a Mac with **Xcode 15+** and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
 
 There is no App Store listing — you build and install it yourself with Xcode (see below).

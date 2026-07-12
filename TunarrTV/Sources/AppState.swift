@@ -116,7 +116,14 @@ final class AppState: ObservableObject {
     private var missedHeartbeats = 0
     private var demoLoopObserver: NSObjectProtocol?
 
-    let player = AVPlayer()
+    let player: AVPlayer = {
+        let player = AVPlayer()
+        // Let AVPlayer hand video off to AirPlay (Apple TV / AirPlay 2) when
+        // the user picks a route. Default is already true on iOS; set it
+        // explicitly so the intent is clear and survives SDK default changes.
+        player.allowsExternalPlayback = true
+        return player
+    }()
     let deviceLocation = DeviceLocation()
 
     private var refreshTask: Task<Void, Never>?
