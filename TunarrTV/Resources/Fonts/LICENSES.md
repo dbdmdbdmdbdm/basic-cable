@@ -10,6 +10,7 @@ All bundled fonts are licensed under the SIL Open Font License 1.1 (full text be
 - Pixelify Sans — Copyright 2021, The Pixelify Sans Project Authors
 - Silkscreen — Copyright 2001, The Silkscreen Project Authors (Jason Kottke)
 - Press Start 2P — Copyright 2012, The Press Start 2P Project Authors (CodeMan38)
+- Doto — Copyright 2024, The Doto Project Authors (github.com/googlefonts/doto)
 
 ---
 

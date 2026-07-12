@@ -55,15 +55,19 @@ struct ImmichAsset: Identifiable, Decodable, Hashable {
         return rotated ? width > height : height > width
     }
 
-    /// 1...365 from the capture date (leap days fold into March 1) —
-    /// used for the on-this-day seasonal weighting.
+    /// 1...366 from the capture date — used for the on-this-day seasonal
+    /// weighting. Uses the same leap-aware `Calendar.ordinality` as
+    /// `seasonalShuffle`'s `todayDay` so the two never disagree by a day.
     var dayOfYear: Int? {
         guard let localDateTime, localDateTime.count >= 10,
+              let year = Int(localDateTime.prefix(4)),
               let month = Int(localDateTime.dropFirst(5).prefix(2)),
               let day = Int(localDateTime.dropFirst(8).prefix(2)),
-              (1...12).contains(month), (1...31).contains(day) else { return nil }
-        let cumulative = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
-        return cumulative[month - 1] + day
+              (1...12).contains(month), (1...31).contains(day),
+              let date = Calendar.current.date(
+                from: DateComponents(year: year, month: month, day: day))
+        else { return nil }
+        return Calendar.current.ordinality(of: .day, in: .year, for: date)
     }
 
     /// Weighted shuffle for the slideshow: photos taken within two weeks

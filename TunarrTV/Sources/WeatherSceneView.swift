@@ -55,6 +55,9 @@ struct WeatherSceneView: View {
                 page = (page + 1) % pageCount
             }
         }
+        .onChange(of: pageCount) { _, count in
+            page = min(page, max(0, count - 1))
+        }
         .task { await state.refreshWeather() }
     }
 

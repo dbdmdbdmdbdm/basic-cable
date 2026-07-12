@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import Combine
+import CryptoKit
 import UIKit
 
 @MainActor
@@ -504,6 +505,59 @@ final class AppState: ObservableObject {
         return snapshot
     }
 
+    // MARK: - Backup secret encryption
+    //
+    // The settings backup rides the add-on's /data (and therefore Home
+    // Assistant's own backups, which propagate off-box to cloud storage) and
+    // is served unauthenticated on the LAN. The powerful credentials in it —
+    // the HA long-lived token and the Immich key — are therefore encrypted at
+    // the app boundary with AES-GCM so the stored/served blob is opaque. The
+    // symmetric key never leaves the user's own devices (on-device +
+    // iCloud KVS, the same trust domain the settings already sync through), so
+    // restore works across the user's devices; a device without the key simply
+    // can't decrypt those two fields (both are user-regenerable) and leaves the
+    // existing values untouched. Non-secret settings stay plaintext so a
+    // config restore always works even without the key.
+
+    /// Setting keys whose values are encrypted before leaving the device.
+    static let secretSettingKeys: Set<String> = ["haToken", "immichKey"]
+    private static let backupEncPrefix = "enc:v1:"
+    private static let backupKeyDefaultsKey = "backupCryptoKey"
+
+    /// Fetches (or lazily creates + syncs) the 256-bit backup key.
+    private func backupCryptoKey() -> SymmetricKey {
+        let stored = UserDefaults.standard.string(forKey: Self.backupKeyDefaultsKey)
+            ?? NSUbiquitousKeyValueStore.default.string(forKey: Self.backupKeyDefaultsKey)
+        if let b64 = stored, let data = Data(base64Encoded: b64), data.count == 32 {
+            return SymmetricKey(data: data)
+        }
+        let key = SymmetricKey(size: .bits256)
+        let b64 = key.withUnsafeBytes { Data($0).base64EncodedString() }
+        UserDefaults.standard.set(b64, forKey: Self.backupKeyDefaultsKey)
+        NSUbiquitousKeyValueStore.default.set(b64, forKey: Self.backupKeyDefaultsKey)
+        NSUbiquitousKeyValueStore.default.synchronize()
+        return key
+    }
+
+    private func encryptSecret(_ plaintext: String) -> String? {
+        guard let data = plaintext.data(using: .utf8),
+              let sealed = try? AES.GCM.seal(data, using: backupCryptoKey()),
+              let combined = sealed.combined else { return nil }
+        return Self.backupEncPrefix + combined.base64EncodedString()
+    }
+
+    /// Returns the plaintext, passing through values that aren't encrypted
+    /// (older plaintext backups), or nil when a ciphertext can't be opened.
+    private func decryptSecret(_ value: String) -> String? {
+        guard value.hasPrefix(Self.backupEncPrefix) else { return value }
+        let b64 = String(value.dropFirst(Self.backupEncPrefix.count))
+        guard let combined = Data(base64Encoded: b64),
+              let box = try? AES.GCM.SealedBox(combined: combined),
+              let data = try? AES.GCM.open(box, using: backupCryptoKey()),
+              let plaintext = String(data: data, encoding: .utf8) else { return nil }
+        return plaintext
+    }
+
     /// Wipes every setting. includeCloud also clears the iCloud copy —
     /// without it, a synced device re-inherits from iCloud on relaunch.
     func resetAllSettings(includeCloud: Bool) {
@@ -541,9 +595,17 @@ final class AppState: ObservableObject {
         guard let origin = addonOrigin() else {
             return "SET THE DASHBOARD/ADD-ON URL FIRST — THAT'S WHERE BACKUPS GO"
         }
-        let settings = settingsSnapshot()
+        var settings = settingsSnapshot()
+        // Encrypt the credential fields so the backup blob (which reaches HA's
+        // off-box backups and is served unauthenticated on the LAN) never
+        // carries the HA token or Immich key in cleartext.
+        for key in Self.secretSettingKeys {
+            if let value = settings[key], !value.isEmpty, let sealed = encryptSecret(value) {
+                settings[key] = sealed
+            }
+        }
         let payload: [String: Any] = [
-            "version": 1,
+            "version": 2,
             "savedAt": ISO8601DateFormatter().string(from: Date()),
             "device": UIDevice.current.name,
             "settings": settings,
@@ -576,7 +638,17 @@ final class AppState: ObservableObject {
               let settings = payload["settings"] as? [String: String] else {
             return "RESTORE FAILED — BACKUP UNREADABLE"
         }
-        for key in Self.settingsKeys { applySetting(key, settings[key] ?? "") }
+        for key in Self.settingsKeys {
+            var value = settings[key] ?? ""
+            if Self.secretSettingKeys.contains(key), value.hasPrefix(Self.backupEncPrefix) {
+                // Encrypted credential: decrypt with this device's key. If it
+                // can't be opened (no key synced here), leave the existing
+                // value in place rather than wiping a working token.
+                guard let plaintext = decryptSecret(value) else { continue }
+                value = plaintext
+            }
+            applySetting(key, value)
+        }
         Task {
             await reload()
             await refreshWeather(force: true)
@@ -725,8 +797,15 @@ final class AppState: ObservableObject {
                 guide = try await client.fetchGuide(from: from, to: to)
             } catch {
                 loadError = "Can't reach Tunarr at \(serverURLString)"
-                isFullscreen = false
-                return
+                // A transient Tunarr failure (e.g. the every-5-min background
+                // refresh hitting a blip) must NOT boot the viewer out of
+                // fullscreen or wipe the lineup — especially when a synthetic
+                // channel (weather/photos/cameras/dashboard) is tuned and
+                // doesn't even use Tunarr. If we already have a lineup, keep
+                // it and just surface the error; the next good reload clears it.
+                if !self.channels.isEmpty { return }
+                // First-load failure: fall through so the synthetic channels
+                // below still populate a usable guide instead of a dead screen.
             }
         }
 
@@ -747,6 +826,13 @@ final class AppState: ObservableObject {
             if let target = channels.first(where: { $0.id == lastId }) ?? channels.first {
                 tune(target)
             }
+        } else if let tuned = tunedChannel,
+                  let fresh = channels.first(where: { $0.id == tuned.id }),
+                  fresh != tuned {
+            // Keep the retained tuned channel pointing at the freshly-decoded
+            // instance so channel up/down (which locates it in `channels`)
+            // still finds it after a rename/icon change across reloads.
+            tunedChannel = fresh
         }
     }
 
@@ -1176,7 +1262,7 @@ final class AppState: ObservableObject {
     private func step(by delta: Int) {
         guard !channels.isEmpty else { return }
         guard let tuned = tunedChannel,
-              let index = channels.firstIndex(of: tuned) else {
+              let index = channels.firstIndex(where: { $0.id == tuned.id }) else {
             tune(channels[0])
             return
         }

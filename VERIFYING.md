@@ -47,7 +47,7 @@ open TunarrTV.xcodeproj     # build & run on your own device with free signing
 ```
 
 The app has no server component, no analytics SDK, and no third-party
-dependencies — the ~2,700 lines of Swift in `TunarrTV/Sources` are the whole
+code dependencies — the ~2,700 lines of Swift in `TunarrTV/Sources` are the whole
 app, small enough to read in an afternoon. Network calls exist in exactly two
 files: `TunarrClient.swift` (your Tunarr server) and `WeatherService.swift`
 (Open-Meteo, plus optional Home Assistant).

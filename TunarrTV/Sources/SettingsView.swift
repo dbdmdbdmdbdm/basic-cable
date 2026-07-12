@@ -299,7 +299,7 @@ struct SettingsView: View {
 
     private var backupSection: some View {
         section("BACKUP & RESET", tint: Color(white: 0.42)) {
-            caption("BACK UP sends every on-device setting (tokens included) to the screencap add-on, which keeps one backup file under its /data folder — so Home Assistant's own backups include it. Add-on-managed lists already live in HA and are covered there. RESTORE pulls that file back and applies it.")
+            caption("BACK UP sends every on-device setting to the screencap add-on, which keeps one backup file under its /data folder — so Home Assistant's own backups include it. Your Home Assistant token and Immich key are encrypted first (only your own devices hold the key), so the stored backup never carries them in the clear. Add-on-managed lists already live in HA and are covered there. RESTORE pulls that file back and applies it.")
             HStack(spacing: 16) {
                 Button(backupBusy ? "WORKING..." : "BACK UP TO ADD-ON") {
                     guard !backupBusy else { return }
@@ -606,11 +606,18 @@ struct SettingsView: View {
                  destination: URL(string: "https://buymeacoffee.com/dbdmdbdmdbdm")!)
                 .font(Theme.mono(15 * uiScale, weight: .medium))
                 .foregroundColor(Color(red: 0.95, green: 0.78, blue: 0.12))
+            Link("...OR SUPPORT DIGITAL RIGHTS — DONATE TO THE EFF",
+                 destination: URL(string: "https://eff.org/donate")!)
+                .font(Theme.mono(15 * uiScale, weight: .medium))
+                .foregroundColor(Color(red: 0.42, green: 0.72, blue: 0.98))
             #else
-            // No browser on tvOS — just show the address.
+            // No browser on tvOS — just show the addresses.
             Text("ENJOYING IT? BUYMEACOFFEE.COM/DBDMDBDMDBDM")
                 .font(Theme.mono(15 * uiScale, weight: .medium))
                 .foregroundColor(Color(red: 0.95, green: 0.78, blue: 0.12))
+            Text("...OR SUPPORT DIGITAL RIGHTS — EFF.ORG/DONATE")
+                .font(Theme.mono(15 * uiScale, weight: .medium))
+                .foregroundColor(Color(red: 0.42, green: 0.72, blue: 0.98))
             #endif
         }
         .padding(.top, 24)

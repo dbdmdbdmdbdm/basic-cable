@@ -1,6 +1,6 @@
 # Basic Cable
 
-> ☕ Enjoying Basic Cable? [Buy me a coffee](https://buymeacoffee.com/dbdmdbdmdbdm).
+> ☕ Enjoying Basic Cable? [Buy me a coffee](https://buymeacoffee.com/dbdmdbdmdbdm) — or, better yet, [donate to the EFF](https://eff.org/donate) to support digital rights.
 >
 > 🔍 Want to check that the App Store build matches this source? See [VERIFYING.md](VERIFYING.md).
 
@@ -150,6 +150,7 @@ With a paid Apple Developer account the install is valid for about a year; with 
   - `InfoPanelView.swift` — program details + control cluster
   - `PlayerViews.swift` — AVPlayerLayer wrapper + fullscreen player
   - `ContentView.swift`, `Theme.swift`, `SettingsView.swift`
+- `TunarrTV/Resources/` — bundled fonts (OFL, see `Fonts/LICENSES.md`) and demo-mode video: the demo channels play short, self-generated ffmpeg test-pattern clips (color bars, cartoon, static, synthwave) — no third-party video is included.
 
 ## License
 

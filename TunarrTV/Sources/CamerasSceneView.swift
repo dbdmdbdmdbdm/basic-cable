@@ -232,7 +232,10 @@ private struct CameraTileView: View {
 
     private func run() async {
         // Tear down when the camera list changes out from under us.
-        defer { player?.pause() }
+        defer {
+            player?.pause()
+            player?.replaceCurrentItem(with: nil)
+        }
         while !Task.isCancelled {
             guard let ha = state.haClient else {
                 status = "NOT CONFIGURED"

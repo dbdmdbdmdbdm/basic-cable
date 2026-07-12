@@ -1,9 +1,8 @@
 name: Basic Cable Screencap
-version: "1.5.0"
+version: "1.5.1"
 slug: ha_screencap
 description: Serves PNG snapshots of your dashboards for the Basic Cable app's Home Dashboard channels
 url: https://github.com/dbdmdbdmdbdm/basic-cable
-webui: http://[HOST]:[PORT:8080]/config
 hassio_api: true
 ingress: true
 ingress_port: 8080
@@ -19,6 +18,7 @@ ports:
   8080/tcp: 8090
 ports_description:
   8080/tcp: Snapshot server (/latest.png, /latest/<n>.png, /healthz)
+watchdog: "http://[HOST]:[PORT:8080]/healthz"
 options:
   token: ""
   dash_paths: /lovelace/0
