@@ -110,8 +110,17 @@ struct FullscreenPlayerIOS: View {
                 .gesture(
                     DragGesture(minimumDistance: 40)
                         .onEnded { value in
+                            let dx = value.translation.width
                             let dy = value.translation.height
-                            guard abs(dy) > 60, abs(dy) > abs(value.translation.width) else { return }
+                            // Cameras: a horizontal swipe walks the spotlight
+                            // through the bank (entering it from the grid).
+                            if state.isCamerasTuned, abs(dx) > abs(dy), abs(dx) > 60 {
+                                state.cameraSpotlightMove(dx < 0 ? 1 : -1)
+                                withAnimation { showControls = true }
+                                scheduleHide()
+                                return
+                            }
+                            guard abs(dy) > 60, abs(dy) > abs(dx) else { return }
                             if dy < 0 {
                                 state.channelUp()
                             } else {
@@ -144,6 +153,22 @@ struct FullscreenPlayerIOS: View {
     private var controls: some View {
         VStack {
             HStack(alignment: .top) {
+                // Back to the camera grid from the spotlight.
+                if state.isCamerasTuned, state.cameraSpotlight != nil {
+                    Button {
+                        state.cameraSpotlightExit()
+                        scheduleHide()
+                    } label: {
+                        Image(systemName: "square.grid.2x2")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 48, height: 48)
+                            .background(Color.black.opacity(0.6))
+                            .clipShape(Circle())
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
                 if let channel = state.tunedChannel {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("\(channel.number)  \(channel.name.uppercased())")

@@ -81,7 +81,13 @@ struct FullscreenPlayerView: View {
         // press-and-hold select opens quick options instead.
         .onTapGesture {
             guard !showQuickPanel else { return }
-            state.isFullscreen = false
+            if state.isCamerasTuned {
+                // Select toggles the camera spotlight rather than exiting.
+                if state.cameraSpotlight == nil { state.cameraSpotlightMove(1) }
+                else { state.cameraSpotlightExit() }
+            } else {
+                state.isFullscreen = false
+            }
         }
         .onLongPressGesture(minimumDuration: 0.6) {
             guard !showQuickPanel else { return }
@@ -90,6 +96,18 @@ struct FullscreenPlayerView: View {
         }
         .onPlayPauseCommand { state.togglePause() }
         .onMoveCommand { direction in
+            // On the cameras channel, left/right walks the spotlight through
+            // the bank; up/down still zaps channels.
+            if state.isCamerasTuned {
+                switch direction {
+                case .up: state.channelUp(); showBanner()
+                case .down: state.channelDown(); showBanner()
+                case .left: state.cameraSpotlightMove(-1)
+                case .right: state.cameraSpotlightMove(1)
+                @unknown default: break
+                }
+                return
+            }
             switch direction {
             case .up:
                 state.channelUp()
@@ -108,6 +126,9 @@ struct FullscreenPlayerView: View {
         .onExitCommand {
             if showQuickPanel {
                 closeQuickPanel()
+            } else if state.isCamerasTuned, state.cameraSpotlight != nil {
+                // Menu backs out of the spotlight to the camera grid first.
+                state.cameraSpotlightExit()
             } else {
                 state.isFullscreen = false
             }

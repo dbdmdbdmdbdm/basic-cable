@@ -125,6 +125,27 @@ final class AppState: ObservableObject {
         return player
     }()
     let deviceLocation = DeviceLocation()
+
+    /// Cameras channel spotlight: index into `visibleCameraIds` of the camera
+    /// shown large (with the others as a side filmstrip), or nil for the grid.
+    @Published var cameraSpotlight: Int?
+
+    /// Move the spotlight focus by `delta`, wrapping; entering the spotlight
+    /// from the grid (nil) lands on the first camera going right, last going left.
+    func cameraSpotlightMove(_ delta: Int) {
+        let count = visibleCameraIds.count
+        guard count > 0 else { cameraSpotlight = nil; return }
+        let current = cameraSpotlight ?? (delta >= 0 ? -1 : 0)
+        cameraSpotlight = ((current + delta) % count + count) % count
+    }
+
+    func cameraSpotlightFocus(_ index: Int) {
+        guard index >= 0, index < visibleCameraIds.count else { return }
+        cameraSpotlight = index
+    }
+
+    func cameraSpotlightExit() { cameraSpotlight = nil }
+
     #if os(iOS)
     /// Chromecast sender (open-source CASTV2, no Google SDK). iOS/iPad only.
     let cast = CastController()
@@ -1104,6 +1125,8 @@ final class AppState: ObservableObject {
         let previous = tunedChannel
         tunedChannel = channel
         isPaused = false
+        // Leaving (or re-tuning) the cameras channel drops back to the grid.
+        if channel.id != previous?.id { cameraSpotlight = nil }
         UserDefaults.standard.set(channel.id, forKey: "lastChannelId")
         // NOTE: no explicit session teardown on tune-away. Tunarr 1.3.8's
         // DELETE /channels/:id/sessions removes the session record but
