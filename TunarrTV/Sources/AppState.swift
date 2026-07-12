@@ -997,6 +997,35 @@ final class AppState: ObservableObject {
     /// configured in settings. Each is one continuous all-day guide block.
     private func syntheticChannels(from: Date, to: Date) -> [(Channel, [GuideEntry])] {
         var lineup: [(Channel, [GuideEntry])] = []
+        if isDemoMode {
+            // Demo mode has no real HA/Immich config, so surface fake versions
+            // of the cameras, photos, and dashboard channels (bundled images).
+            let cameras = Channel(id: Self.camerasChannelId, name: "Security",
+                                  number: CamerasChannel.number, icon: nil, groupTitle: nil)
+            lineup.append((cameras, [Self.allDayEntry(
+                id: "cams-full", channelId: cameras.id, from: from, to: to,
+                kind: .cameras, title: "SECURITY CAMERAS",
+                summary: "A live multi-camera wall — press left/right to spotlight a camera.")]))
+            let photos = Channel(id: Self.photosChannelId, name: "Photos",
+                                 number: PhotosChannel.number, icon: nil, groupTitle: nil)
+            lineup.append((photos, [Self.allDayEntry(
+                id: "photos-full", channelId: photos.id, from: from, to: to,
+                kind: .photos, title: "FAMILY ALBUM",
+                summary: "A rotating slideshow of your photos.")]))
+            let dashboard = Channel(id: Self.dashboardChannelId(index: 0), name: "Home",
+                                    number: Self.dashboardChannelNumber(index: 0), icon: nil, groupTitle: nil)
+            lineup.append((dashboard, [Self.allDayEntry(
+                id: "hadash-full-0", channelId: dashboard.id, from: from, to: to,
+                kind: .haDashboard, title: "HOME DASHBOARD",
+                summary: "Your Home Assistant dashboard as a channel.")]))
+            let weather = Self.makeWeatherChannel()
+            lineup.append((weather, [Self.allDayEntry(
+                id: "wx-full", channelId: weather.id, from: from, to: to,
+                kind: .weather, title: "LOCAL FORECAST",
+                summary: "Current conditions, extended forecast, and around-the-house readings.")]))
+            lineup.sort { $0.0.number < $1.0.number }
+            return lineup
+        }
         if haClient != nil, !effectiveCameraIds.isEmpty {
             let channel = Channel(id: Self.camerasChannelId, name: "Security",
                                   number: CamerasChannel.number, icon: nil, groupTitle: nil)

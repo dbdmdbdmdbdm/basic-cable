@@ -86,13 +86,13 @@ struct CamerasSceneView: View {
     var compact = false
 
     var body: some View {
-        let cameras = state.visibleCameraIds
+        let cameras = state.isDemoMode ? DemoContent.demoCameraIds : state.visibleCameraIds
         GeometryReader { geo in
             ZStack {
                 Color.black
-                if state.haClient == nil {
+                if !state.isDemoMode, state.haClient == nil {
                     message("SET THE HOME ASSISTANT URL AND TOKEN IN SETTINGS")
-                } else if state.cameraEntityIds.isEmpty {
+                } else if !state.isDemoMode, state.cameraEntityIds.isEmpty {
                     message("ADD CAMERA ENTITIES IN SETTINGS")
                 } else if cameras.isEmpty {
                     message("ALL CAMERAS HIDDEN — TOGGLE THEM ON IN SETTINGS")
@@ -215,10 +215,18 @@ private struct CameraTileView: View {
     @State private var player: AVPlayer?
     @State private var status = "CONNECTING..."
 
+    private var demoCamera: DemoContent.DemoCamera? { DemoContent.demoCamera(entityId) }
+
     var body: some View {
         ZStack {
             Color.black
-            if let player {
+            if let demo = demoCamera, let image = DemoContent.demoImage(demo.image) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+            } else if let player {
                 PlayerLayerView(player: player, gravity: .resizeAspectFill)
             } else {
                 Text(status)
@@ -230,26 +238,31 @@ private struct CameraTileView: View {
             overlay
         }
         .border(Color(white: 0.18), width: 1)
-        .task(id: entityId) { await run() }
+        .task(id: entityId) {
+            // Demo tiles show a bundled image; no stream to fetch.
+            if demoCamera == nil { await run() }
+        }
     }
 
     private var overlay: some View {
         let fontSize: CGFloat = compact ? 9 : 17
+        let live = player != nil || demoCamera != nil
+        let name = demoCamera?.name ?? CameraName.display(entityId)
         return VStack {
             HStack(alignment: .top) {
-                Text("CAM \(index + 1) · \(CameraName.display(entityId))")
+                Text("CAM \(index + 1) · \(name)")
                     .font(Theme.mono(fontSize, weight: .medium))
                     .foregroundColor(.white.opacity(0.9))
                     .shadow(color: .black, radius: 0, x: 1, y: 1)
                     .lineLimit(1)
                 Spacer()
-                if player != nil {
+                if live {
                     RecordingDot(size: compact ? 5 : 9, fontSize: fontSize)
                 }
             }
             Spacer()
             HStack {
-                if player != nil {
+                if live {
                     TimestampView(fontSize: fontSize)
                 }
                 Spacer()
