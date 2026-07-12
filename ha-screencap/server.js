@@ -469,6 +469,44 @@ http
       }));
       return;
     }
+    // App settings backup: the Basic Cable app POSTs its full on-device
+    // settings here and can GET them back to restore. One file under
+    // /data, which HA's own backups include. LAN-trust model, same as
+    // the rest of this server — the payload carries the HA token the app
+    // was already configured with.
+    if (req.url.startsWith('/config/appbackup')) {
+      const fs = require('fs');
+      const backupPath = process.env.APP_BACKUP_FILE || '/data/app-settings-backup.json';
+      if (req.method === 'POST') {
+        let body = '';
+        req.on('data', (chunk) => {
+          body += chunk;
+          if (body.length > 262144) req.destroy(); // settings are tiny
+        });
+        req.on('end', () => {
+          try {
+            JSON.parse(body);
+            fs.writeFileSync(backupPath, body);
+            console.log(`app settings backup stored (${body.length} bytes)`);
+            res.writeHead(200, { 'Content-Type': 'text/plain' });
+            res.end('ok');
+          } catch (e) {
+            res.writeHead(400, { 'Content-Type': 'text/plain' });
+            res.end(`bad backup payload: ${e.message}`);
+          }
+        });
+        return;
+      }
+      try {
+        const data = fs.readFileSync(backupPath);
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(data);
+      } catch (_) {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('no backup stored');
+      }
+      return;
+    }
     if (req.url.startsWith('/config/save') && req.method === 'POST') {
       if (!SUPERVISOR_TOKEN) {
         res.writeHead(403, { 'Content-Type': 'text/plain' });

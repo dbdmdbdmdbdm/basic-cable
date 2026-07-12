@@ -455,6 +455,137 @@ final class AppState: ObservableObject {
         persist(weatherOverlayOnCameras ? "true" : "false", forKey: "weatherOverlayCameras")
     }
 
+    // MARK: - Settings backup / restore / reset
+
+    /// Every persisted settings key — backup, restore, and reset all walk
+    /// this list, so a new setting only needs adding here (plus a case in
+    /// applySetting).
+    static let settingsKeys = [
+        "serverURL", "manualLocation", "haURL", "haToken",
+        "haSensorEntities", "haWeatherEntity", "haCameraEntities",
+        "hiddenCameras", "dashImageURL", "immichURL", "immichKey",
+        "immichAlbumId", "immichAlbumName", "mediaPlayerEntities",
+        "tickerEnabled", "weatherOverlayPhotos", "weatherOverlayCameras",
+    ]
+
+    private func applySetting(_ key: String, _ value: String) {
+        switch key {
+        case "serverURL": serverURLString = value
+        case "manualLocation": manualLocation = value
+        case "haURL": haURLString = value
+        case "haToken": haToken = value
+        case "haSensorEntities": haSensorEntities = value
+        case "haWeatherEntity": haWeatherEntity = value
+        case "haCameraEntities": haCameraEntities = value
+        case "hiddenCameras":
+            hiddenCameraIds = Set(value.split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty })
+        case "dashImageURL": dashImageURLString = value
+        case "immichURL": immichURLString = value
+        case "immichKey": immichAPIKey = value
+        case "immichAlbumId": immichAlbumId = value
+        case "immichAlbumName": immichAlbumName = value
+        case "mediaPlayerEntities": mediaPlayerEntities = value
+        case "tickerEnabled": tickerEnabled = value == "true"
+        case "weatherOverlayPhotos": weatherOverlayOnPhotos = value == "true"
+        case "weatherOverlayCameras": weatherOverlayOnCameras = value == "true"
+        default: break
+        }
+    }
+
+    func settingsSnapshot() -> [String: String] {
+        var snapshot: [String: String] = [:]
+        for key in Self.settingsKeys {
+            if let value = UserDefaults.standard.string(forKey: key), !value.isEmpty {
+                snapshot[key] = value
+            }
+        }
+        return snapshot
+    }
+
+    /// Wipes every setting. includeCloud also clears the iCloud copy —
+    /// without it, a synced device re-inherits from iCloud on relaunch.
+    func resetAllSettings(includeCloud: Bool) {
+        if includeCloud {
+            let cloud = NSUbiquitousKeyValueStore.default
+            for key in Self.settingsKeys { cloud.removeObject(forKey: key) }
+            cloud.synchronize()
+        }
+        for key in Self.settingsKeys + ["lastChannelId"] {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+        for key in Self.settingsKeys { applySetting(key, "") }
+        remoteConfig = nil
+        remoteConfigOrigin = nil
+        isFullscreen = false
+        showSettings = true          // straight back to first-run setup
+        Task { await reload() }
+    }
+
+    /// The screencap add-on's origin, derived from the dashboard field —
+    /// the same probe target /appconfig uses.
+    private func addonOrigin() -> URL? {
+        for dashboard in Self.parseDashboards(dashImageURLString) {
+            guard var components = URLComponents(url: dashboard.url, resolvingAgainstBaseURL: false) else { continue }
+            components.path = ""
+            components.query = nil
+            if let url = components.url { return url }
+        }
+        return nil
+    }
+
+    /// Backs up all on-device settings to the add-on (stored under its
+    /// /data, which HA's own backups include). Returns a status line.
+    func backupSettingsToAddon() async -> String {
+        guard let origin = addonOrigin() else {
+            return "SET THE DASHBOARD/ADD-ON URL FIRST — THAT'S WHERE BACKUPS GO"
+        }
+        let settings = settingsSnapshot()
+        let payload: [String: Any] = [
+            "version": 1,
+            "savedAt": ISO8601DateFormatter().string(from: Date()),
+            "device": UIDevice.current.name,
+            "settings": settings,
+        ]
+        var request = URLRequest(url: origin.appendingPathComponent("config/appbackup"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 10
+        request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        guard let (_, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200 else {
+            return "BACKUP FAILED — IS THE ADD-ON REACHABLE?"
+        }
+        return "BACKED UP \(settings.count) SETTINGS ✓"
+    }
+
+    func restoreSettingsFromAddon() async -> String {
+        guard let origin = addonOrigin() else {
+            return "SET THE DASHBOARD/ADD-ON URL FIRST — THAT'S WHERE BACKUPS LIVE"
+        }
+        var request = URLRequest(url: origin.appendingPathComponent("config/appbackup"))
+        request.timeoutInterval = 10
+        guard let (data, response) = try? await URLSession.shared.data(for: request) else {
+            return "RESTORE FAILED — IS THE ADD-ON REACHABLE?"
+        }
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            return "NO BACKUP STORED ON THE ADD-ON YET"
+        }
+        guard let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let settings = payload["settings"] as? [String: String] else {
+            return "RESTORE FAILED — BACKUP UNREADABLE"
+        }
+        for key in Self.settingsKeys { applySetting(key, settings[key] ?? "") }
+        Task {
+            await reload()
+            await refreshWeather(force: true)
+        }
+        let device = payload["device"] as? String ?? "?"
+        let savedAt = (payload["savedAt"] as? String ?? "").prefix(16).replacingOccurrences(of: "T", with: " ")
+        return "RESTORED \(settings.count) SETTINGS ✓ (FROM \(device.uppercased()), \(savedAt))"
+    }
+
     /// Applies settings changed on another device. Local edits re-persist
     /// through `persist`, which is idempotent, so no feedback loop.
     private func adoptCloudChanges(_ keys: [String]) {

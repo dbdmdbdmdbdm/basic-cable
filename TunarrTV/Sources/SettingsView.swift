@@ -38,6 +38,10 @@ struct SettingsView: View {
 
     @State private var showAllSections = false
 
+    @State private var backupStatus: String?
+    @State private var backupBusy = false
+    @State private var armedAction: String?
+
     /// First-run keeps the form to just the Tunarr URL — unless the user
     /// already runs standalone (built-in channels, no Tunarr).
     private var isFirstRun: Bool {
@@ -115,6 +119,7 @@ struct SettingsView: View {
                     photosSection
                     tickerSection
                     syncSection
+                    backupSection
                 }
 
                 buttonRow
@@ -127,19 +132,23 @@ struct SettingsView: View {
             }
             .padding(60 * uiScale)
         }
-        .onAppear {
-            urlText = state.serverURLString
-            locationText = state.manualLocation
-            haURLText = state.haURLString
-            haTokenText = state.haToken
-            haSensorsText = state.haSensorEntities
-            haWeatherText = state.haWeatherEntity
-            haCamerasText = state.haCameraEntities
-            dashURLText = state.dashImageURLString
-            immichURLText = state.immichURLString
-            immichKeyText = state.immichAPIKey
-            mediaPlayersText = state.mediaPlayerEntities
-        }
+        .onAppear { loadFields() }
+    }
+
+    /// Pulls the saved settings into the editable field texts — on appear,
+    /// and again after a restore or reset changes them underneath us.
+    private func loadFields() {
+        urlText = state.serverURLString
+        locationText = state.manualLocation
+        haURLText = state.haURLString
+        haTokenText = state.haToken
+        haSensorsText = state.haSensorEntities
+        haWeatherText = state.haWeatherEntity
+        haCamerasText = state.haCameraEntities
+        dashURLText = state.dashImageURLString
+        immichURLText = state.immichURLString
+        immichKeyText = state.immichAPIKey
+        mediaPlayersText = state.mediaPlayerEntities
     }
 
     // MARK: - Sections
@@ -173,15 +182,23 @@ struct SettingsView: View {
                   placeholder: "http://homeassistant.local:8123", text: $haURLText)
             field("HOME ASSISTANT LONG-LIVED TOKEN",
                   placeholder: "eyJhbGciOi...", text: $haTokenText)
-            field("HA SENSOR ENTITIES (COMMA-SEPARATED)",
-                  placeholder: "sensor.outdoor_temp, sensor.pool_temp", text: $haSensorsText)
-            field("HA WEATHER ENTITY (OPTIONAL) — REPLACES OPEN-METEO AS THE FORECAST SOURCE",
-                  placeholder: "weather.home", text: $haWeatherText)
-            managedByAddonNote
-            suggestionControl("sensors", suggestions: sensorSuggestions, listText: $haSensorsText,
-                              buttonTitle: "SUGGEST SENSORS") {
-                await state.suggestWeatherSensors(urlString: haURLText, token: haTokenText)
-            } assign: { sensorSuggestions = $0 }
+            if let remote = state.remoteConfig?.weather_sensors, !remote.isEmpty {
+                managedField("HA SENSOR ENTITIES", values: remote)
+            } else {
+                field("HA SENSOR ENTITIES (COMMA-SEPARATED)",
+                      placeholder: "sensor.outdoor_temp, sensor.pool_temp", text: $haSensorsText)
+                suggestionControl("sensors", suggestions: sensorSuggestions, listText: $haSensorsText,
+                                  buttonTitle: "SUGGEST SENSORS") {
+                    await state.suggestWeatherSensors(urlString: haURLText, token: haTokenText)
+                } assign: { sensorSuggestions = $0 }
+            }
+            if let remote = state.remoteConfig?.weather_entity,
+               !remote.trimmingCharacters(in: .whitespaces).isEmpty {
+                managedField("HA WEATHER ENTITY", values: [remote])
+            } else {
+                field("HA WEATHER ENTITY (OPTIONAL) — REPLACES OPEN-METEO AS THE FORECAST SOURCE",
+                      placeholder: "weather.home", text: $haWeatherText)
+            }
             testControl("ha") {
                 await state.testHomeAssistant(urlString: haURLText, token: haTokenText,
                                               sensorEntities: haSensorsText)
@@ -191,14 +208,17 @@ struct SettingsView: View {
 
     private var camerasSection: some View {
         section("SECURITY CAMERAS CHANNEL — \(CamerasChannel.number) (OPTIONAL)", tint: Theme.cellCameras) {
-            field("HA CAMERA ENTITIES (COMMA-SEPARATED)",
-                  placeholder: "camera.front_door, camera.backyard", text: $haCamerasText)
-            managedByAddonNote
+            if let remote = state.remoteConfig?.cameras, !remote.isEmpty {
+                managedField("HA CAMERA ENTITIES", values: remote)
+            } else {
+                field("HA CAMERA ENTITIES (COMMA-SEPARATED)",
+                      placeholder: "camera.front_door, camera.backyard", text: $haCamerasText)
+                suggestionControl("cameras", suggestions: cameraSuggestions, listText: $haCamerasText,
+                                  buttonTitle: "SUGGEST CAMERAS") {
+                    await state.suggestCameras(urlString: haURLText, token: haTokenText)
+                } assign: { cameraSuggestions = $0 }
+            }
             caption("Shows all cameras live in one grid as channel \(CamerasChannel.number) (list order = grid order). Uses the Home Assistant URL and token above — streams come straight from HA, full motion.")
-            suggestionControl("cameras", suggestions: cameraSuggestions, listText: $haCamerasText,
-                              buttonTitle: "SUGGEST CAMERAS") {
-                await state.suggestCameras(urlString: haURLText, token: haTokenText)
-            } assign: { cameraSuggestions = $0 }
             testControl("cameras") {
                 await state.testCameras(urlString: haURLText, token: haTokenText,
                                         cameraEntities: haCamerasText)
@@ -253,14 +273,17 @@ struct SettingsView: View {
 
     private var tickerSection: some View {
         section("NOW PLAYING TICKER (OPTIONAL)", tint: Color(white: 0.55)) {
-            field("HA MEDIA PLAYER ENTITIES (COMMA-SEPARATED)",
-                  placeholder: "media_player.living_room, media_player.kitchen", text: $mediaPlayersText)
-            managedByAddonNote
+            if let remote = state.remoteConfig?.media_players, !remote.isEmpty {
+                managedField("HA MEDIA PLAYER ENTITIES", values: remote)
+            } else {
+                field("HA MEDIA PLAYER ENTITIES (COMMA-SEPARATED)",
+                      placeholder: "media_player.living_room, media_player.kitchen", text: $mediaPlayersText)
+                suggestionControl("mediaplayers", suggestions: mediaPlayerSuggestions, listText: $mediaPlayersText,
+                                  buttonTitle: "SUGGEST MEDIA PLAYERS") {
+                    await state.suggestMediaPlayers(urlString: haURLText, token: haTokenText)
+                } assign: { mediaPlayerSuggestions = $0 }
+            }
             caption("A news-style black bar along the bottom of every channel: what's playing on these media players on the left (speakers playing the same thing collapse to one), weather and clock on the right. Turn it on while watching — hold SELECT on the remote (or press LEFT/RIGHT); the ticker button on iPhone. It stays on while you zap, until you turn it off the same way.")
-            suggestionControl("mediaplayers", suggestions: mediaPlayerSuggestions, listText: $mediaPlayersText,
-                              buttonTitle: "SUGGEST MEDIA PLAYERS") {
-                await state.suggestMediaPlayers(urlString: haURLText, token: haTokenText)
-            } assign: { mediaPlayerSuggestions = $0 }
         }
     }
 
@@ -272,6 +295,69 @@ struct SettingsView: View {
             }
             caption("Shares these settings (including the Home Assistant token) across your devices through your own iCloud account.")
         }
+    }
+
+    private var backupSection: some View {
+        section("BACKUP & RESET", tint: Color(white: 0.42)) {
+            caption("BACK UP sends every on-device setting (tokens included) to the screencap add-on, which keeps one backup file under its /data folder — so Home Assistant's own backups include it. Add-on-managed lists already live in HA and are covered there. RESTORE pulls that file back and applies it.")
+            HStack(spacing: 16) {
+                Button(backupBusy ? "WORKING..." : "BACK UP TO ADD-ON") {
+                    guard !backupBusy else { return }
+                    backupBusy = true
+                    Task {
+                        backupStatus = await state.backupSettingsToAddon()
+                        backupBusy = false
+                    }
+                }
+                .font(Theme.mono(19 * uiScale))
+                confirmButton("RESTORE FROM ADD-ON", id: "restore") {
+                    guard !backupBusy else { return }
+                    backupBusy = true
+                    Task {
+                        backupStatus = await state.restoreSettingsFromAddon()
+                        loadFields()
+                        backupBusy = false
+                    }
+                }
+            }
+            if let backupStatus {
+                Text(backupStatus)
+                    .font(Theme.mono(17 * uiScale, weight: .medium))
+                    .foregroundColor(backupStatus.contains("✓") ? Theme.onAir : Theme.accent)
+            }
+            caption("RESET wipes the app back to first-run — handy for testing a restore. THIS DEVICE keeps the iCloud copy (a synced device re-inherits it on relaunch); EVERYWHERE also clears iCloud so all devices start fresh.")
+            HStack(spacing: 16) {
+                confirmButton("RESET THIS DEVICE", id: "resetLocal") {
+                    state.resetAllSettings(includeCloud: false)
+                    loadFields()
+                    backupStatus = "RESET ✓ — BACK TO FIRST-RUN"
+                }
+                confirmButton("RESET EVERYWHERE (+ICLOUD)", id: "resetAll") {
+                    state.resetAllSettings(includeCloud: true)
+                    loadFields()
+                    backupStatus = "RESET ✓ — DEVICE AND ICLOUD CLEARED"
+                }
+            }
+        }
+    }
+
+    /// Destructive buttons take two presses: the first arms (label flips
+    /// to PRESS AGAIN), disarming itself after 4 seconds untouched.
+    private func confirmButton(_ title: String, id: String, action: @escaping () -> Void) -> some View {
+        Button(armedAction == id ? "PRESS AGAIN TO CONFIRM" : title) {
+            if armedAction == id {
+                armedAction = nil
+                action()
+            } else {
+                armedAction = id
+                Task {
+                    try? await Task.sleep(nanoseconds: 4_000_000_000)
+                    if armedAction == id { armedAction = nil }
+                }
+            }
+        }
+        .font(Theme.mono(19 * uiScale))
+        .foregroundColor(armedAction == id ? Theme.accent : nil)
     }
 
     // MARK: - Album picker
@@ -567,13 +653,24 @@ struct SettingsView: View {
 
     /// Shown wherever the add-on's app config takes precedence.
     @ViewBuilder
-    private var managedByAddonNote: some View {
-        if state.remoteConfig != nil {
-            Text("✓ MANAGED BY THE SCREENCAP ADD-ON — its app config overrides this list.")
-                .font(Theme.mono(16 * uiScale, weight: .medium))
+    /// A setting the add-on currently manages: shown read-only and greyed
+    /// so it's obvious the app isn't using the local value, with a pointer
+    /// to where it's actually edited.
+    private func managedField(_ label: String, values: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("🔒 \(label) — MANAGED BY THE ADD-ON")
+                .font(Theme.mono(18 * uiScale))
                 .foregroundColor(Theme.onAir)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(values.isEmpty ? "—" : values.joined(separator: ", "))
+                .font(Theme.mono(20 * uiScale, weight: .medium))
+                .foregroundColor(Theme.dimText)
+                .opacity(0.55)
+            Text("Edit in Home Assistant → BASIC CABLE in the sidebar. Turn off the add-on's app-config switch to edit on-device instead.")
+                .font(.system(size: 15 * uiScale))
+                .foregroundColor(Theme.dimText)
+                .opacity(0.7)
         }
+        .frame(maxWidth: 1000, alignment: .leading)
     }
 
     /// A TEST button + result line + optional preview image for one
