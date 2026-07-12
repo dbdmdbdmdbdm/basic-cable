@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// Canned lineup for demo mode: fake retro channels with believable
 /// schedules, each playing a bundled test-pattern clip on loop. Lets App
@@ -109,6 +110,36 @@ enum DemoContent {
 
     /// Demo weather location when none is configured (Cupertino, CA).
     static let fallbackCoordinate = (latitude: 37.323, longitude: -122.032)
+
+    // MARK: - Demo synthetic-channel content
+    //
+    // Fake, self-generated images (no real Home Assistant / Immich instance)
+    // so the cameras, photos, and dashboard channels have something to show in
+    // demo mode and App Store screenshots. Bundled under Resources/.
+
+    struct DemoCamera { let id: String; let name: String; let image: String }
+
+    static let demoCameras: [DemoCamera] = [
+        .init(id: "demo-cam-0", name: "FRONT DOOR", image: "demo-cam-0"),
+        .init(id: "demo-cam-1", name: "BACKYARD", image: "demo-cam-1"),
+        .init(id: "demo-cam-2", name: "DRIVEWAY", image: "demo-cam-2"),
+        .init(id: "demo-cam-3", name: "SIDE GATE", image: "demo-cam-3"),
+    ]
+    static var demoCameraIds: [String] { demoCameras.map(\.id) }
+    static func demoCamera(_ id: String) -> DemoCamera? { demoCameras.first { $0.id == id } }
+
+    static let demoPhotos = [
+        "demo-photo-1", "demo-photo-2", "demo-photo-3",
+        "demo-photo-4", "demo-photo-5", "demo-photo-6",
+    ]
+    static let demoDashboard = "demo-dashboard"
+
+    /// Loads a bundled demo image (loose Resource file, not an asset catalog).
+    static func demoImage(_ name: String, ext: String = "jpg") -> UIImage? {
+        guard let url = Bundle.main.url(forResource: name, withExtension: ext),
+              let data = try? Data(contentsOf: url) else { return nil }
+        return UIImage(data: data)
+    }
 
     static func clipURL(for channel: Channel) -> URL? {
         guard let spec = channels.first(where: { $0.id == channel.id }) else { return nil }

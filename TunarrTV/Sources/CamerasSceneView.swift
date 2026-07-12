@@ -86,16 +86,18 @@ struct CamerasSceneView: View {
     var compact = false
 
     var body: some View {
-        let cameras = state.visibleCameraIds
+        let cameras = state.isDemoMode ? DemoContent.demoCameraIds : state.visibleCameraIds
         GeometryReader { geo in
             ZStack {
                 Color.black
-                if state.haClient == nil {
+                if !state.isDemoMode, state.haClient == nil {
                     message("SET THE HOME ASSISTANT URL AND TOKEN IN SETTINGS")
-                } else if state.cameraEntityIds.isEmpty {
+                } else if !state.isDemoMode, state.cameraEntityIds.isEmpty {
                     message("ADD CAMERA ENTITIES IN SETTINGS")
                 } else if cameras.isEmpty {
                     message("ALL CAMERAS HIDDEN — TOGGLE THEM ON IN SETTINGS")
+                } else if !compact, cameras.count >= 2, let focus = state.cameraSpotlight {
+                    spotlight(cameras, focus: focus, in: geo.size)
                 } else {
                     grid(cameras, in: geo.size)
                 }
@@ -158,6 +160,37 @@ struct CamerasSceneView: View {
         }
     }
 
+    /// Spotlight: the focused camera fills most of the screen with the others
+    /// stacked as a filmstrip down the side. Every camera keeps a stable
+    /// identity (its entity id), so changing focus only re-frames the existing
+    /// players — no teardown and no re-buffering when you switch cameras.
+    private func spotlight(_ cameras: [String], focus rawFocus: Int, in size: CGSize) -> some View {
+        let focus = min(max(rawFocus, 0), cameras.count - 1)
+        let stripWidth = min(max(size.width * 0.2, 160), 360)
+        let bigWidth = size.width - stripWidth
+        let others = cameras.indices.filter { $0 != focus }
+        let slotHeight = size.height / CGFloat(max(others.count, 1))
+        return ZStack(alignment: .topLeading) {
+            ForEach(Array(cameras.enumerated()), id: \.element) { index, entityId in
+                let isFocus = index == focus
+                let stripSlot = others.firstIndex(of: index) ?? 0
+                CameraTileView(entityId: entityId, index: index, compact: !isFocus)
+                    .frame(width: isFocus ? bigWidth : stripWidth,
+                           height: isFocus ? size.height : slotHeight)
+                    #if os(iOS)
+                    // Tap a filmstrip thumbnail to focus it (iOS/iPad).
+                    .contentShape(Rectangle())
+                    .onTapGesture { if !isFocus { state.cameraSpotlightFocus(index) } }
+                    #endif
+                    .position(
+                        x: isFocus ? bigWidth / 2 : bigWidth + stripWidth / 2,
+                        y: isFocus ? size.height / 2 : slotHeight * (CGFloat(stripSlot) + 0.5)
+                    )
+            }
+        }
+        .animation(.easeInOut(duration: 0.28), value: focus)
+    }
+
     private func showsWeatherTile(_ count: Int) -> Bool {
         let columns = count == 1 ? 1 : (count <= 4 ? 2 : 3)
         let rows = Int(ceil(Double(count) / Double(columns)))
@@ -187,10 +220,18 @@ private struct CameraTileView: View {
     @State private var player: AVPlayer?
     @State private var status = "CONNECTING..."
 
+    private var demoCamera: DemoContent.DemoCamera? { DemoContent.demoCamera(entityId) }
+
     var body: some View {
         ZStack {
             Color.black
-            if let player {
+            if let demo = demoCamera, let image = DemoContent.demoImage(demo.image) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+            } else if let player {
                 PlayerLayerView(player: player, gravity: .resizeAspectFill)
             } else {
                 Text(status)
@@ -202,26 +243,31 @@ private struct CameraTileView: View {
             overlay
         }
         .border(Color(white: 0.18), width: 1)
-        .task(id: entityId) { await run() }
+        .task(id: entityId) {
+            // Demo tiles show a bundled image; no stream to fetch.
+            if demoCamera == nil { await run() }
+        }
     }
 
     private var overlay: some View {
         let fontSize: CGFloat = compact ? 9 : 17
+        let live = player != nil || demoCamera != nil
+        let name = demoCamera?.name ?? CameraName.display(entityId)
         return VStack {
             HStack(alignment: .top) {
-                Text("CAM \(index + 1) · \(CameraName.display(entityId))")
+                Text("CAM \(index + 1) · \(name)")
                     .font(Theme.mono(fontSize, weight: .medium))
                     .foregroundColor(.white.opacity(0.9))
                     .shadow(color: .black, radius: 0, x: 1, y: 1)
                     .lineLimit(1)
                 Spacer()
-                if player != nil {
+                if live {
                     RecordingDot(size: compact ? 5 : 9, fontSize: fontSize)
                 }
             }
             Spacer()
             HStack {
-                if player != nil {
+                if live {
                     TimestampView(fontSize: fontSize)
                 }
                 Spacer()

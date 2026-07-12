@@ -83,6 +83,14 @@ final class AppState: ObservableObject {
     @Published var weatherOverlayOnCameras: Bool {
         didSet { persist(weatherOverlayOnCameras ? "true" : "false", forKey: "weatherOverlayCameras") }
     }
+    /// Opt-in: publish what this device is playing to Home Assistant as a
+    /// per-device sensor (`sensor.basic_cable_<device>`). Off by default.
+    @Published var haReportNowPlaying: Bool {
+        didSet {
+            persist(haReportNowPlaying ? "true" : "false", forKey: "haReportNowPlaying")
+            reportNowPlayingToHA()
+        }
+    }
     /// Mirror settings through iCloud key-value storage so configuring the
     /// iPhone app configures the Apple TV app (and vice versa).
     @Published var iCloudSyncEnabled: Bool {
@@ -100,7 +108,11 @@ final class AppState: ObservableObject {
     @Published var windowStart: Date
     @Published var now: Date = Date()
     // Launch into fullscreen playing the last channel, like turning on a TV.
-    @Published var isFullscreen = true
+    @Published var isFullscreen = true {
+        didSet {
+            if haReportNowPlaying, isFullscreen != oldValue { reportNowPlayingToHA() }
+        }
+    }
     @Published var showSettings = false
     @Published var isPaused = false
     @Published var loadError: String?
@@ -125,6 +137,27 @@ final class AppState: ObservableObject {
         return player
     }()
     let deviceLocation = DeviceLocation()
+
+    /// Cameras channel spotlight: index into `visibleCameraIds` of the camera
+    /// shown large (with the others as a side filmstrip), or nil for the grid.
+    @Published var cameraSpotlight: Int?
+
+    /// Move the spotlight focus by `delta`, wrapping; entering the spotlight
+    /// from the grid (nil) lands on the first camera going right, last going left.
+    func cameraSpotlightMove(_ delta: Int) {
+        let count = visibleCameraIds.count
+        guard count > 0 else { cameraSpotlight = nil; return }
+        let current = cameraSpotlight ?? (delta >= 0 ? -1 : 0)
+        cameraSpotlight = ((current + delta) % count + count) % count
+    }
+
+    func cameraSpotlightFocus(_ index: Int) {
+        guard index >= 0, index < visibleCameraIds.count else { return }
+        cameraSpotlight = index
+    }
+
+    func cameraSpotlightExit() { cameraSpotlight = nil }
+
     #if os(iOS)
     /// Chromecast sender (open-source CASTV2, no Google SDK). iOS/iPad only.
     let cast = CastController()
@@ -429,6 +462,7 @@ final class AppState: ObservableObject {
             || !setting("tickerChannels").isEmpty
         weatherOverlayOnPhotos = setting("weatherOverlayPhotos") == "true"
         weatherOverlayOnCameras = setting("weatherOverlayCameras") == "true"
+        haReportNowPlaying = setting("haReportNowPlaying") == "true"
         windowStart = Self.floorToQuarterHour(Date())
 
         NotificationCenter.default.addObserver(
@@ -482,6 +516,7 @@ final class AppState: ObservableObject {
         persist(tickerEnabled ? "true" : "false", forKey: "tickerEnabled")
         persist(weatherOverlayOnPhotos ? "true" : "false", forKey: "weatherOverlayPhotos")
         persist(weatherOverlayOnCameras ? "true" : "false", forKey: "weatherOverlayCameras")
+        persist(haReportNowPlaying ? "true" : "false", forKey: "haReportNowPlaying")
     }
 
     // MARK: - Settings backup / restore / reset
@@ -495,6 +530,7 @@ final class AppState: ObservableObject {
         "hiddenCameras", "dashImageURL", "immichURL", "immichKey",
         "immichAlbumId", "immichAlbumName", "mediaPlayerEntities",
         "tickerEnabled", "weatherOverlayPhotos", "weatherOverlayCameras",
+        "haReportNowPlaying",
     ]
 
     private func applySetting(_ key: String, _ value: String) {
@@ -519,8 +555,54 @@ final class AppState: ObservableObject {
         case "tickerEnabled": tickerEnabled = value == "true"
         case "weatherOverlayPhotos": weatherOverlayOnPhotos = value == "true"
         case "weatherOverlayCameras": weatherOverlayOnCameras = value == "true"
+        case "haReportNowPlaying": haReportNowPlaying = value == "true"
         default: break
         }
+    }
+
+    // MARK: - Now-playing → Home Assistant
+
+    /// Publishes what this device is showing to a per-device HA sensor
+    /// (`sensor.basic_cable_<device>`). Opt-in via `haReportNowPlaying`;
+    /// fire-and-forget, guarded by an HA client being configured.
+    func reportNowPlayingToHA(background: Bool = false) {
+        guard let ha = haClient else { return }
+        let device = UIDevice.current.name
+        let entityId = "sensor.basic_cable_\(Self.entitySlug(device))"
+        var attributes: [String: Any] = [
+            "friendly_name": "Basic Cable (\(device))",
+            "icon": "mdi:television-classic",
+        ]
+        let stateValue: String
+        if background {
+            stateValue = "Idle"; attributes["view"] = "background"
+        } else if !haReportNowPlaying {
+            stateValue = "Off"; attributes["view"] = "off"
+        } else if let channel = tunedChannel {
+            stateValue = channel.name
+            attributes["channel"] = channel.number
+            attributes["view"] = isFullscreen ? "watching" : "guide"
+            if let program = nowPlaying(on: channel)?.title { attributes["program"] = program }
+        } else {
+            stateValue = "Idle"; attributes["view"] = "idle"
+        }
+        Task { await ha.setState(entityId: entityId, state: stateValue, attributes: attributes) }
+    }
+
+    /// Slugifies a device name into a valid HA entity-id suffix ([a-z0-9_]).
+    static func entitySlug(_ name: String) -> String {
+        var slug = ""
+        var pendingUnderscore = false
+        for character in name.lowercased() {
+            if character.isASCII, character.isLetter || character.isNumber {
+                if pendingUnderscore, !slug.isEmpty { slug.append("_") }
+                slug.append(character)
+                pendingUnderscore = false
+            } else {
+                pendingUnderscore = true
+            }
+        }
+        return slug.isEmpty ? "device" : slug
     }
 
     func settingsSnapshot() -> [String: String] {
@@ -976,6 +1058,35 @@ final class AppState: ObservableObject {
     /// configured in settings. Each is one continuous all-day guide block.
     private func syntheticChannels(from: Date, to: Date) -> [(Channel, [GuideEntry])] {
         var lineup: [(Channel, [GuideEntry])] = []
+        if isDemoMode {
+            // Demo mode has no real HA/Immich config, so surface fake versions
+            // of the cameras, photos, and dashboard channels (bundled images).
+            let cameras = Channel(id: Self.camerasChannelId, name: "Security",
+                                  number: CamerasChannel.number, icon: nil, groupTitle: nil)
+            lineup.append((cameras, [Self.allDayEntry(
+                id: "cams-full", channelId: cameras.id, from: from, to: to,
+                kind: .cameras, title: "SECURITY CAMERAS",
+                summary: "A live multi-camera wall — press left/right to spotlight a camera.")]))
+            let photos = Channel(id: Self.photosChannelId, name: "Photos",
+                                 number: PhotosChannel.number, icon: nil, groupTitle: nil)
+            lineup.append((photos, [Self.allDayEntry(
+                id: "photos-full", channelId: photos.id, from: from, to: to,
+                kind: .photos, title: "FAMILY ALBUM",
+                summary: "A rotating slideshow of your photos.")]))
+            let dashboard = Channel(id: Self.dashboardChannelId(index: 0), name: "Home",
+                                    number: Self.dashboardChannelNumber(index: 0), icon: nil, groupTitle: nil)
+            lineup.append((dashboard, [Self.allDayEntry(
+                id: "hadash-full-0", channelId: dashboard.id, from: from, to: to,
+                kind: .haDashboard, title: "HOME DASHBOARD",
+                summary: "Your Home Assistant dashboard as a channel.")]))
+            let weather = Self.makeWeatherChannel()
+            lineup.append((weather, [Self.allDayEntry(
+                id: "wx-full", channelId: weather.id, from: from, to: to,
+                kind: .weather, title: "LOCAL FORECAST",
+                summary: "Current conditions, extended forecast, and around-the-house readings.")]))
+            lineup.sort { $0.0.number < $1.0.number }
+            return lineup
+        }
         if haClient != nil, !effectiveCameraIds.isEmpty {
             let channel = Channel(id: Self.camerasChannelId, name: "Security",
                                   number: CamerasChannel.number, icon: nil, groupTitle: nil)
@@ -1104,6 +1215,8 @@ final class AppState: ObservableObject {
         let previous = tunedChannel
         tunedChannel = channel
         isPaused = false
+        // Leaving (or re-tuning) the cameras channel drops back to the grid.
+        if channel.id != previous?.id { cameraSpotlight = nil }
         UserDefaults.standard.set(channel.id, forKey: "lastChannelId")
         // NOTE: no explicit session teardown on tune-away. Tunarr 1.3.8's
         // DELETE /channels/:id/sessions removes the session record but
@@ -1115,6 +1228,7 @@ final class AppState: ObservableObject {
         if tickerEnabled {
             Task { await refreshWeather() }
         }
+        if haReportNowPlaying { reportNowPlayingToHA() }
         if Self.isSyntheticChannel(channel.id) {
             itemFailureWatch = nil
             pendingTune?.cancel()
@@ -1209,6 +1323,7 @@ final class AppState: ObservableObject {
     /// its ffmpeg cleanly. (Explicitly DELETEing the session leaks the
     /// ffmpeg on Tunarr 1.3.8, so we deliberately don't.)
     func appDidEnterBackground() {
+        if haReportNowPlaying { reportNowPlayingToHA(background: true) }
         guard let channel = tunedChannel, !Self.isSyntheticChannel(channel.id), !isDemoMode else { return }
         _ = channel
         pendingTune?.cancel()
@@ -1217,6 +1332,7 @@ final class AppState: ObservableObject {
     }
 
     func appDidBecomeActive() {
+        if haReportNowPlaying { reportNowPlayingToHA() }
         guard let channel = tunedChannel, !Self.isSyntheticChannel(channel.id), !isDemoMode,
               player.currentItem == nil else { return }
         tune(channel, isRetry: true)

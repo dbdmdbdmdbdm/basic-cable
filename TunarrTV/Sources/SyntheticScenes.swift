@@ -102,6 +102,10 @@ struct DashboardSceneView: View {
         .task(id: url) {
             image = nil
             consecutiveFailures = 0
+            if state.isDemoMode {
+                image = DemoContent.demoImage(DemoContent.demoDashboard, ext: "png")
+                return
+            }
             await run()
         }
     }
@@ -220,7 +224,24 @@ struct PhotoSceneView: View {
         .task(id: state.immichAlbumId) {
             panes = []
             status = "LOADING PHOTOS..."
+            if state.isDemoMode {
+                await runDemo()
+                return
+            }
             await run()
+        }
+    }
+
+    /// Demo slideshow over the bundled fake photos (no Immich).
+    private func runDemo() async {
+        let images = DemoContent.demoPhotos.compactMap { DemoContent.demoImage($0) }
+        guard !images.isEmpty else { status = "NO DEMO PHOTOS"; return }
+        var index = 0
+        while !Task.isCancelled {
+            panes = [Pane(image: images[index % images.count], date: nil)]
+            slideIndex += 1
+            index += 1
+            try? await Task.sleep(nanoseconds: Self.secondsPerPhoto * 1_000_000_000)
         }
     }
 
