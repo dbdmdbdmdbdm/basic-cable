@@ -161,6 +161,16 @@ struct FullscreenPlayerIOS: View {
                     .cornerRadius(6)
                 }
                 Spacer()
+                // Cast: send the live channel to a Chromecast on the LAN.
+                CastButton(controller: state.cast,
+                           streamURL: state.castableStreamURL,
+                           title: state.castableChannelTitle)
+                // AirPlay: hand the stream off to an Apple TV / AirPlay 2 receiver.
+                AirPlayButton()
+                    .frame(width: 24, height: 24)
+                    .frame(width: 48, height: 48)
+                    .background(Color.black.opacity(0.6))
+                    .clipShape(Circle())
                 Button {
                     state.tickerEnabled.toggle()
                     if state.tickerEnabled {

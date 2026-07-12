@@ -1,7 +1,14 @@
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 struct ContentView: View {
     @EnvironmentObject var state: AppState
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var hSize
+    private let isPad = UIDevice.current.userInterfaceIdiom == .pad
+    #endif
 
     var body: some View {
         ZStack {
@@ -9,7 +16,13 @@ struct ContentView: View {
             #if os(tvOS)
             tvBody
             #else
-            phoneBody
+            // iPad (regular width) gets the two-pane layout; iPhone and iPad
+            // slide-over (compact) keep the stacked phone layout.
+            if isPad, hSize == .regular {
+                padBody
+            } else {
+                phoneBody
+            }
             #endif
         }
         .overlay(alignment: .top) {
@@ -19,7 +32,9 @@ struct ContentView: View {
             }
         }
         .overlay(alignment: .topTrailing) {
-            if state.isDemoMode {
+            // The badge marks demo mode in normal use; `--hide-demo-badge`
+            // suppresses it for clean App Store / README screenshots.
+            if state.isDemoMode, !CommandLine.arguments.contains("--hide-demo-badge") {
                 DemoBadge()
                     .padding(.top, 18)
                     .padding(.trailing, 24)
@@ -106,6 +121,53 @@ struct ContentView: View {
         }
         .padding(.horizontal, 10)
         .padding(.top, 4)
+        .fullScreenCover(isPresented: $state.isFullscreen) {
+            FullscreenPlayerIOS()
+                .environmentObject(state)
+        }
+    }
+
+    // MARK: - iPad
+
+    /// Two-pane layout for the roomier iPad screen: a large video preview and
+    /// the program info side by side up top, the full EPG grid below — the
+    /// same shape as the Apple TV guide, driven by touch.
+    private var padBody: some View {
+        GeometryReader { geo in
+            let topHeight = geo.size.height * 0.42
+            let guideScale = max(0.62, min(0.92, geo.size.width / 1500))
+            VStack(spacing: 18) {
+                HStack(alignment: .top, spacing: 24) {
+                    ZStack {
+                        if state.isSyntheticTuned {
+                            SyntheticChannelView(compact: true, scale: 0.85)
+                        } else {
+                            PlayerLayerView(player: state.player)
+                            if state.isBuffering, let channel = state.tunedChannel {
+                                TuningIndicator(channel: channel)
+                            } else if let trouble = state.streamTrouble, let channel = state.tunedChannel {
+                                StreamTroubleIndicator(channel: channel, trouble: trouble)
+                            }
+                        }
+                    }
+                    .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black)
+                    .overlay(Rectangle().stroke(Color(white: 0.25), lineWidth: 1))
+                    .onTapGesture {
+                        if state.tunedChannel != nil { state.isFullscreen = true }
+                    }
+
+                    InfoPanelView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                }
+                .frame(height: topHeight)
+
+                GuideView(scale: guideScale)
+            }
+            .padding(.horizontal, 22)
+            .padding(.top, 10)
+        }
         .fullScreenCover(isPresented: $state.isFullscreen) {
             FullscreenPlayerIOS()
                 .environmentObject(state)

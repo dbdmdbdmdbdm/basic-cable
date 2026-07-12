@@ -116,8 +116,36 @@ final class AppState: ObservableObject {
     private var missedHeartbeats = 0
     private var demoLoopObserver: NSObjectProtocol?
 
-    let player = AVPlayer()
+    let player: AVPlayer = {
+        let player = AVPlayer()
+        // Let AVPlayer hand video off to AirPlay (Apple TV / AirPlay 2) when
+        // the user picks a route. Default is already true on iOS; set it
+        // explicitly so the intent is clear and survives SDK default changes.
+        player.allowsExternalPlayback = true
+        return player
+    }()
     let deviceLocation = DeviceLocation()
+    #if os(iOS)
+    /// Chromecast sender (open-source CASTV2, no Google SDK). iOS/iPad only.
+    let cast = CastController()
+
+    /// The live HLS URL for the tuned channel, or nil when there's nothing to
+    /// cast — a synthetic channel, demo mode, or no server configured.
+    var castableStreamURL: URL? {
+        guard !isDemoMode, let channel = tunedChannel,
+              !Self.isSyntheticChannel(channel.id), let client else { return nil }
+        return client.streamURL(for: channel)
+    }
+
+    /// A human title for the cast receiver ("CHANNEL · PROGRAM").
+    var castableChannelTitle: String {
+        guard let channel = tunedChannel else { return "Basic Cable" }
+        if let program = nowPlaying(on: channel)?.title {
+            return "\(channel.name) · \(program)"
+        }
+        return channel.name
+    }
+    #endif
 
     private var refreshTask: Task<Void, Never>?
     private var guideFetchedThrough: Date = .distantPast
