@@ -19,7 +19,9 @@ struct ContentView: View {
             }
         }
         .overlay(alignment: .topTrailing) {
-            if state.isDemoMode {
+            // The badge marks demo mode in normal use; `--hide-demo-badge`
+            // suppresses it for clean App Store / README screenshots.
+            if state.isDemoMode, !CommandLine.arguments.contains("--hide-demo-badge") {
                 DemoBadge()
                     .padding(.top, 18)
                     .padding(.trailing, 24)
