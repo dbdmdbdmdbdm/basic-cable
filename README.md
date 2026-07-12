@@ -20,7 +20,7 @@
 - Optional **photos channel** (channel 997): a slideshow of your [Immich](https://immich.app) favorites with crossfades, a slow Ken Burns drift, side-by-side portrait pairs, and an "on this day"-flavored rotation
 - Optional **security cameras channel** (channel 951): every Home Assistant camera live at once in a retro CCTV wall — full-motion HLS straight from HA, no transcoding
 - All of the above work **with or without Tunarr** — leave the server URL blank and the app runs on just the built-in channels
-- **AirPlay** — send any channel to an Apple TV or AirPlay 2 receiver from the iPhone/iPad fullscreen controls (Apple's own route picker; no third-party SDK)
+- **Cast** — from the iPhone/iPad fullscreen controls, send a live channel to a **Chromecast / Google TV** (a small, self-contained CASTV2 implementation — no Google Cast SDK, no added dependencies) or **AirPlay** it to an Apple TV / AirPlay 2 receiver (Apple's own route picker)
 - **Universal** — one app for Apple TV, iPhone, and iPad; iPad gets a two-pane layout (video preview + program info up top, full guide below), close to the Apple TV experience
 - No account, no tracking, no dependencies — one small SwiftUI app talking to your own server
 

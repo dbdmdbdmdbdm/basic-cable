@@ -88,8 +88,10 @@ targets:
           - UIInterfaceOrientationLandscapeRight
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
-        NSLocalNetworkUsageDescription: Connects to your Tunarr server on the local network to stream channels.
+        NSLocalNetworkUsageDescription: Connects to your Tunarr server and discovers Chromecast devices on your local network.
         NSLocationWhenInUseUsageDescription: Used to show your local forecast on the weather channel.
+        NSBonjourServices:
+          - _googlecast._tcp
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.dbdm.tunarrtv

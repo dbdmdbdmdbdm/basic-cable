@@ -27,8 +27,12 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_googlecast._tcp</string>
+	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Connects to your Tunarr server on the local network to stream channels.</string>
+	<string>Connects to your Tunarr server and discovers Chromecast devices on your local network.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Used to show your local forecast on the weather channel.</string>
 	<key>UILaunchScreen</key>
