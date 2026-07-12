@@ -32,6 +32,10 @@ struct WeatherData {
     /// "City, ST" for the forecast coordinates (reverse-geocoded, cached).
     var locationName: String?
     var fetchedAt = Date.distantPast
+    /// Attribution shown on the channel — Open-Meteo's CC BY 4.0 license
+    /// requires credit when it's the source; an HA weather entity credits
+    /// its own provider instead.
+    var source = "OPEN-METEO.COM"
 
     var hasForecast: Bool { current != nil && !days.isEmpty }
 }
@@ -76,6 +80,25 @@ enum WMO {
         let dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
         let index = Int((degrees + 22.5) / 45.0) % 8
         return dirs[index]
+    }
+
+    /// Nearest WMO code for a Home Assistant weather condition string, so
+    /// HA-sourced forecasts reuse the same descriptions and symbols.
+    static func code(forHACondition condition: String) -> Int {
+        switch condition {
+        case "sunny", "clear-night", "exceptional": return 0
+        case "windy": return 1
+        case "partlycloudy", "windy-variant": return 2
+        case "cloudy": return 3
+        case "fog": return 45
+        case "rainy": return 61
+        case "pouring": return 65
+        case "snowy": return 71
+        case "snowy-rainy": return 85
+        case "lightning", "lightning-rainy": return 95
+        case "hail": return 96
+        default: return -1
+        }
     }
 }
 
@@ -325,6 +348,111 @@ struct HAClient {
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
         return UIImage(data: data)
+    }
+
+    /// Forecast from a Home Assistant `weather.*` entity: current conditions
+    /// from its state/attributes, daily forecast via the get_forecasts
+    /// service. Returns a cleaned attribution string for the channel footer.
+    func fetchWeather(entity: String) async throws -> (WeatherData.Current, [WeatherData.Day], String?) {
+        struct WeatherState: Decodable {
+            let state: String
+            let attributes: Attrs
+            struct Attrs: Decodable {
+                let temperature: Double?
+                let temperature_unit: String?
+                let apparent_temperature: Double?
+                let humidity: Double?
+                let wind_speed: Double?
+                let wind_speed_unit: String?
+                let wind_bearing: Double?
+                let attribution: String?
+            }
+        }
+        func toF(_ value: Double, unit: String?) -> Double {
+            unit == "°C" ? value * 9 / 5 + 32 : value
+        }
+        func toMph(_ value: Double, unit: String?) -> Double {
+            switch unit {
+            case "km/h": return value / 1.609344
+            case "m/s": return value * 2.236936
+            default: return value
+            }
+        }
+
+        let (stateData, stateResponse) = try await URLSession.shared.data(for: request(path: "api/states/\(entity)"))
+        guard (stateResponse as? HTTPURLResponse)?.statusCode == 200 else { throw HAError.unreachable }
+        let weather = try JSONDecoder().decode(WeatherState.self, from: stateData)
+        let attrs = weather.attributes
+        guard let temperature = attrs.temperature,
+              !["unavailable", "unknown"].contains(weather.state) else { throw HAError.unreachable }
+
+        let tempUnit = attrs.temperature_unit
+        let current = WeatherData.Current(
+            temperature: toF(temperature, unit: tempUnit),
+            feelsLike: toF(attrs.apparent_temperature ?? temperature, unit: tempUnit),
+            humidity: Int(attrs.humidity ?? 0),
+            windSpeed: toMph(attrs.wind_speed ?? 0, unit: attrs.wind_speed_unit),
+            windDirection: attrs.wind_bearing ?? 0,
+            code: WMO.code(forHACondition: weather.state)
+        )
+
+        // Daily forecast: POST the get_forecasts service with return_response.
+        struct ForecastResponse: Decodable {
+            let service_response: [String: EntityForecast]
+            struct EntityForecast: Decodable {
+                let forecast: [Entry]
+            }
+            struct Entry: Decodable {
+                let condition: String?
+                let datetime: String
+                let temperature: Double?
+                let templow: Double?
+                let precipitation_probability: Double?
+            }
+        }
+        var serviceRequest = URLRequest(
+            url: baseURL.appendingPathComponent("api/services/weather/get_forecasts")
+                .appending(queryItems: [URLQueryItem(name: "return_response", value: "true")]))
+        serviceRequest.httpMethod = "POST"
+        serviceRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        serviceRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        serviceRequest.httpBody = try JSONEncoder().encode(["entity_id": entity, "type": "daily"])
+        serviceRequest.timeoutInterval = 10
+        let (forecastData, forecastResponse) = try await URLSession.shared.data(for: serviceRequest)
+        guard (forecastResponse as? HTTPURLResponse)?.statusCode == 200 else { throw HAError.unreachable }
+        let decoded = try JSONDecoder().decode(ForecastResponse.self, from: forecastData)
+        let entries = decoded.service_response[entity]?.forecast ?? []
+
+        let isoWithOffset = ISO8601DateFormatter()
+        let isoFractional = ISO8601DateFormatter()
+        isoFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var days: [WeatherData.Day] = []
+        for entry in entries.prefix(7) {
+            guard let date = isoWithOffset.date(from: entry.datetime)
+                    ?? isoFractional.date(from: entry.datetime),
+                  let high = entry.temperature else { continue }
+            days.append(WeatherData.Day(
+                id: entry.datetime,
+                date: date,
+                code: WMO.code(forHACondition: entry.condition ?? ""),
+                high: toF(high, unit: tempUnit),
+                low: toF(entry.templow ?? high, unit: tempUnit),
+                precipChance: Int(entry.precipitation_probability ?? 0)
+            ))
+        }
+        guard !days.isEmpty else { throw HAError.unreachable }
+
+        // "Weather data delivered by WeatherFlow" -> "WEATHERFLOW VIA HOME ASSISTANT"
+        var source = "HOME ASSISTANT"
+        if let attribution = attrs.attribution {
+            let cleaned = attribution
+                .replacingOccurrences(of: "(?i)weather data (delivered|provided|powered) by ",
+                                      with: "", options: .regularExpression)
+                .replacingOccurrences(of: "(?i)powered by ", with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cleaned.isEmpty { source = "\(cleaned.uppercased()) VIA HOME ASSISTANT" }
+        }
+        return (current, days, source)
     }
 
     func fetchLocation() async throws -> (latitude: Double, longitude: Double) {

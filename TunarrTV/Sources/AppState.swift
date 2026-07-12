@@ -35,6 +35,11 @@ final class AppState: ObservableObject {
     @Published var haSensorEntities: String {
         didSet { persist(haSensorEntities, forKey: "haSensorEntities") }
     }
+    /// Optional `weather.*` entity — when set, the weather channel's
+    /// forecast comes from Home Assistant instead of Open-Meteo.
+    @Published var haWeatherEntity: String {
+        didSet { persist(haWeatherEntity, forKey: "haWeatherEntity") }
+    }
     @Published var haCameraEntities: String {
         didSet { persist(haCameraEntities, forKey: "haCameraEntities") }
     }
@@ -196,6 +201,7 @@ final class AppState: ObservableObject {
         let dashboards: [Dashboard]?
         let cameras: [String]?
         let weather_sensors: [String]?
+        let weather_entity: String?
         let media_players: [String]?
         let ticker: Ticker?
     }
@@ -244,6 +250,10 @@ final class AppState: ObservableObject {
     var effectiveCameraIds: [String] { Self.override(remoteConfig?.cameras, cameraEntityIds) }
     var effectiveWeatherSensorIds: [String] {
         Self.override(remoteConfig?.weather_sensors, Self.parseEntityList(haSensorEntities))
+    }
+    var effectiveWeatherEntity: String {
+        let remote = remoteConfig?.weather_entity?.trimmingCharacters(in: .whitespaces) ?? ""
+        return remote.isEmpty ? haWeatherEntity.trimmingCharacters(in: .whitespaces) : remote
     }
     var effectiveMediaPlayerIds: [String] { Self.override(remoteConfig?.media_players, mediaPlayerIds) }
     var tickerScroll: Bool { remoteConfig?.ticker?.scroll ?? false }
@@ -370,6 +380,7 @@ final class AppState: ObservableObject {
         haURLString = setting("haURL")
         haToken = setting("haToken")
         haSensorEntities = setting("haSensorEntities")
+        haWeatherEntity = setting("haWeatherEntity")
         haCameraEntities = setting("haCameraEntities")
         hiddenCameraIds = Set(
             setting("hiddenCameras")
@@ -430,6 +441,7 @@ final class AppState: ObservableObject {
         persist(haURLString, forKey: "haURL")
         persist(haToken, forKey: "haToken")
         persist(haSensorEntities, forKey: "haSensorEntities")
+        persist(haWeatherEntity, forKey: "haWeatherEntity")
         persist(haCameraEntities, forKey: "haCameraEntities")
         persist(hiddenCameraIds.sorted().joined(separator: ","), forKey: "hiddenCameras")
         persist(dashImageURLString, forKey: "dashImageURL")
@@ -468,6 +480,9 @@ final class AppState: ObservableObject {
                 weatherChanged = true
             case "haSensorEntities" where value != haSensorEntities:
                 haSensorEntities = value
+                weatherChanged = true
+            case "haWeatherEntity" where value != haWeatherEntity:
+                haWeatherEntity = value
                 weatherChanged = true
             case "haCameraEntities" where value != haCameraEntities:
                 haCameraEntities = value
@@ -785,6 +800,22 @@ final class AppState: ObservableObject {
                 (latitude, longitude) = location
             }
             sensors = await ha.fetchSensors(effectiveWeatherSensorIds)
+
+            // A configured weather entity makes HA the forecast source
+            // (e.g. a Tempest/WeatherFlow station); Open-Meteo stays the
+            // fallback if the entity errors.
+            let weatherEntity = effectiveWeatherEntity
+            if !weatherEntity.isEmpty, !isDemoMode,
+               let (current, days, source) = try? await ha.fetchWeather(entity: weatherEntity) {
+                var locationName: String?
+                if let latitude, let longitude {
+                    locationName = await LocationResolver.name(latitude: latitude, longitude: longitude)
+                }
+                weatherData = WeatherData(current: current, days: days, houseSensors: sensors,
+                                          locationName: locationName, fetchedAt: Date(),
+                                          source: source ?? "HOME ASSISTANT")
+                return
+            }
         }
 
         // Fallback when HA isn't configured: the location field accepts

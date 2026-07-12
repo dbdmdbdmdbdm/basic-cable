@@ -188,11 +188,13 @@ struct WeatherSceneView: View {
     }
 
     private var tickerText: String {
-        // Attribution required by Open-Meteo's CC BY 4.0 license.
+        // Names the actual source: Open-Meteo (CC BY 4.0 requires credit)
+        // or the configured HA weather entity's provider.
+        let source = state.weatherData.source
         if let location = state.weatherData.locationName {
-            return "\(location.uppercased()) · WEATHER DATA BY OPEN-METEO.COM"
+            return "\(location.uppercased()) · WEATHER DATA BY \(source)"
         }
-        return "LOCAL FORECAST · WEATHER DATA BY OPEN-METEO.COM"
+        return "LOCAL FORECAST · WEATHER DATA BY \(source)"
     }
 
     private var tickerBar: some View {

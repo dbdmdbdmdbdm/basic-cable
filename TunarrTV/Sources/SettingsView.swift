@@ -13,6 +13,7 @@ struct SettingsView: View {
     @State private var haURLText = ""
     @State private var haTokenText = ""
     @State private var haSensorsText = ""
+    @State private var haWeatherText = ""
     @State private var haCamerasText = ""
     @State private var dashURLText = ""
     @State private var immichURLText = ""
@@ -56,6 +57,7 @@ struct SettingsView: View {
             || trimmed(haURLText) != state.haURLString
             || trimmed(haTokenText) != state.haToken
             || trimmed(haSensorsText) != state.haSensorEntities
+            || trimmed(haWeatherText) != state.haWeatherEntity
             || trimmed(haCamerasText) != state.haCameraEntities
             || trimmed(dashURLText) != state.dashImageURLString
             || trimmed(immichURLText) != state.immichURLString
@@ -131,6 +133,7 @@ struct SettingsView: View {
             haURLText = state.haURLString
             haTokenText = state.haToken
             haSensorsText = state.haSensorEntities
+            haWeatherText = state.haWeatherEntity
             haCamerasText = state.haCameraEntities
             dashURLText = state.dashImageURLString
             immichURLText = state.immichURLString
@@ -172,6 +175,8 @@ struct SettingsView: View {
                   placeholder: "eyJhbGciOi...", text: $haTokenText)
             field("HA SENSOR ENTITIES (COMMA-SEPARATED)",
                   placeholder: "sensor.outdoor_temp, sensor.pool_temp", text: $haSensorsText)
+            field("HA WEATHER ENTITY (OPTIONAL) — REPLACES OPEN-METEO AS THE FORECAST SOURCE",
+                  placeholder: "weather.home", text: $haWeatherText)
             managedByAddonNote
             suggestionControl("sensors", suggestions: sensorSuggestions, listText: $haSensorsText,
                               buttonTitle: "SUGGEST SENSORS") {
@@ -507,7 +512,7 @@ struct SettingsView: View {
             Text("MIT-LICENSED OPEN SOURCE — GITHUB.COM/DBDMDBDMDBDM/BASIC-CABLE")
                 .font(Theme.mono(15 * uiScale, weight: .medium))
                 .foregroundColor(Theme.dimText)
-            Text("WEATHER DATA BY OPEN-METEO.COM (CC BY 4.0)")
+            Text("WEATHER DATA BY OPEN-METEO.COM (CC BY 4.0), OR YOUR HA WEATHER ENTITY IF SET")
                 .font(Theme.mono(15 * uiScale, weight: .medium))
                 .foregroundColor(Theme.dimText)
             #if os(iOS)
@@ -547,6 +552,7 @@ struct SettingsView: View {
         state.haURLString = haURLText.trimmingCharacters(in: .whitespacesAndNewlines)
         state.haToken = haTokenText.trimmingCharacters(in: .whitespacesAndNewlines)
         state.haSensorEntities = haSensorsText.trimmingCharacters(in: .whitespacesAndNewlines)
+        state.haWeatherEntity = haWeatherText.trimmingCharacters(in: .whitespacesAndNewlines)
         state.haCameraEntities = haCamerasText.trimmingCharacters(in: .whitespacesAndNewlines)
         state.dashImageURLString = dashURLText.trimmingCharacters(in: .whitespacesAndNewlines)
         state.immichURLString = immichURLText.trimmingCharacters(in: .whitespacesAndNewlines)
