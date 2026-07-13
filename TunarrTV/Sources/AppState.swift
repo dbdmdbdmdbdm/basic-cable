@@ -185,6 +185,9 @@ final class AppState: ObservableObject {
     private var prefetchTask: Task<Void, Never>?
     private var lastPrefetchedChannelId: String?
     private var itemFailureWatch: AnyCancellable?
+    #if os(iOS)
+    private var castWatch: AnyCancellable?
+    #endif
     private var pendingTune: Task<Void, Never>?
     private var retryCount = 0
     private var bufferingSince: Date?
@@ -494,6 +497,29 @@ final class AppState: ObservableObject {
             .receive(on: DispatchQueue.main)
             .map { $0 == .waitingToPlayAtSpecifiedRate }
             .assign(to: &$isBuffering)
+
+        #if os(iOS)
+        // Chromecast plays the stream itself on the TV, so the phone must stop
+        // playing the same channel locally — otherwise it runs in both places
+        // (double audio). Pause on-device while a cast session is live and
+        // resume when it ends. (AirPlay is unaffected: it hands this very
+        // player off and never goes through CastController.)
+        castWatch = cast.$status
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                guard let self else { return }
+                let casting: Bool
+                switch status {
+                case .connecting, .casting: casting = true
+                case .idle, .discovering, .failed: casting = false
+                }
+                if casting {
+                    self.player.pause()
+                } else if self.player.currentItem != nil, self.isFullscreen {
+                    self.player.play()
+                }
+            }
+        #endif
     }
 
     // MARK: - Settings persistence & iCloud sync

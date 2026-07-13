@@ -141,8 +141,25 @@ struct FullscreenPlayerIOS: View {
                 }
             }
 
+            // While a Chromecast session is live the stream plays on the TV and
+            // the local player is paused (see AppState.castWatch) — cover the
+            // frozen frame with a casting card. Hit-testing off so a tap still
+            // falls through to toggle the controls (and reach STOP CASTING).
+            if let castName = castingDeviceName, !state.isSyntheticTuned {
+                CastingOverlayIOS(deviceName: castName)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+            }
+
             if showControls {
+                // Keep the controls inside the safe area so the top button row
+                // clears the Dynamic Island / notch (otherwise the Cast and
+                // AirPlay buttons render underneath it and vanish) and the zap
+                // chevrons clear the home indicator. The video/scene layers
+                // below still bleed full-screen via their own .ignoresSafeArea().
                 controls
+                    .padding(.top, geo.safeAreaInsets.top)
+                    .padding(.bottom, geo.safeAreaInsets.bottom)
             }
         }
         .ignoresSafeArea()
@@ -206,16 +223,22 @@ struct FullscreenPlayerIOS: View {
                     .cornerRadius(6)
                 }
                 Spacer()
-                // Cast: send the live channel to a Chromecast on the LAN.
-                CastButton(controller: state.cast,
-                           streamURL: state.castableStreamURL,
-                           title: state.castableChannelTitle)
-                // AirPlay: hand the stream off to an Apple TV / AirPlay 2 receiver.
-                AirPlayButton()
-                    .frame(width: 24, height: 24)
-                    .frame(width: 48, height: 48)
-                    .background(Color.black.opacity(0.6))
-                    .clipShape(Circle())
+                // Cast / AirPlay only apply to a live Tunarr stream. Synthetic
+                // channels (weather/cameras/photos/dashboards) render on-device
+                // with no AVPlayer stream to hand off, so hide the dead controls
+                // there rather than leave them non-functional over the scene.
+                if !state.isSyntheticTuned {
+                    // Cast: send the live channel to a Chromecast on the LAN.
+                    CastButton(controller: state.cast,
+                               streamURL: state.castableStreamURL,
+                               title: state.castableChannelTitle)
+                    // AirPlay: hand the stream off to an Apple TV / AirPlay 2 receiver.
+                    AirPlayButton()
+                        .frame(width: 24, height: 24)
+                        .frame(width: 48, height: 48)
+                        .background(Color.black.opacity(0.6))
+                        .clipShape(Circle())
+                }
                 Button {
                     state.tickerEnabled.toggle()
                     if state.tickerEnabled {
@@ -272,6 +295,14 @@ struct FullscreenPlayerIOS: View {
         }
     }
 
+    /// The receiver name while a cast session is connecting or live, else nil.
+    private var castingDeviceName: String? {
+        switch state.cast.status {
+        case .connecting(let name), .casting(let name): return name
+        case .idle, .discovering, .failed: return nil
+        }
+    }
+
     private func scheduleHide() {
         hideTask?.cancel()
         // Cameras keep the controls up (taps open cameras, not the controls).
@@ -281,6 +312,35 @@ struct FullscreenPlayerIOS: View {
             if !Task.isCancelled {
                 withAnimation { showControls = false }
             }
+        }
+    }
+}
+
+/// Shown over the (paused) local player while casting to a Chromecast: the
+/// stream is playing on the TV, so the phone shows a status card instead of
+/// running the same video a second time.
+private struct CastingOverlayIOS: View {
+    let deviceName: String
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.94)
+            VStack(spacing: 18) {
+                Image(systemName: "tv.fill")
+                    .font(.system(size: 52))
+                    .foregroundColor(Theme.onAir)
+                Text("CASTING TO")
+                    .font(Theme.mono(15))
+                    .foregroundColor(Theme.dimText)
+                Text(deviceName.uppercased())
+                    .font(Theme.mono(26, weight: .medium))
+                    .foregroundColor(.white)
+                    .multilineTextAlignment(.center)
+                Text("PLAYING ON YOUR TV")
+                    .font(Theme.mono(13))
+                    .foregroundColor(Theme.dimText)
+                    .padding(.top, 4)
+            }
+            .padding(40)
         }
     }
 }
