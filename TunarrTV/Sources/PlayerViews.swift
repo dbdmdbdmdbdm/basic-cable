@@ -170,6 +170,15 @@ struct FullscreenPlayerView: View {
                         .font(Theme.mono(24, weight: .medium))
                 }
                 .focused($panelFocused)
+                // Subtitles / CC — live streams only (synthetic channels carry
+                // no caption track). Global across channels.
+                if !state.isSyntheticTuned {
+                    Toggle(isOn: Binding(get: { state.subtitlesEnabled },
+                                         set: { state.subtitlesEnabled = $0 })) {
+                        Text("SUBTITLES / CC")
+                            .font(Theme.mono(24, weight: .medium))
+                    }
+                }
                 Text("HOLD SELECT ANYTIME FOR THIS PANEL · SET PLAYERS IN SETTINGS · MENU TO CLOSE")
                     .font(Theme.mono(15, weight: .medium))
                     .foregroundColor(Theme.dimText)
