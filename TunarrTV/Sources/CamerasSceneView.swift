@@ -86,7 +86,7 @@ struct CamerasSceneView: View {
     var compact = false
 
     var body: some View {
-        let cameras = state.isDemoMode ? DemoContent.demoCameraIds : state.visibleCameraIds
+        let cameras = state.activeCameraIds
         GeometryReader { geo in
             ZStack {
                 Color.black
@@ -132,7 +132,11 @@ struct CamerasSceneView: View {
     }
 
     private func grid(_ cameras: [String], in size: CGSize) -> some View {
-        let columns = cameras.count == 1 ? 1 : (cameras.count <= 4 ? 2 : 3)
+        // A portrait phone (fullscreen) stacks the cameras in one full-width
+        // column so each keeps its shape; the wall (2×2 / 3×3) is for the
+        // landscape/TV/iPad screen and the small guide preview.
+        let portrait = !compact && size.height > size.width
+        let columns = portrait ? 1 : (cameras.count == 1 ? 1 : (cameras.count <= 4 ? 2 : 3))
         let rows = Int(ceil(Double(cameras.count) / Double(columns)))
         let slots = rows * columns
         let tileWidth = size.width / CGFloat(columns)
@@ -154,6 +158,14 @@ struct CamerasSceneView: View {
                             }
                         }
                         .frame(width: tileWidth, height: tileHeight)
+                        #if os(iOS)
+                        // Tap a camera to open it big (iOS/iPad). Applied after
+                        // the frame so the whole cell is the hit target.
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if index < cameras.count, !compact { state.cameraSpotlightFocus(index) }
+                        }
+                        #endif
                     }
                 }
             }
@@ -166,26 +178,38 @@ struct CamerasSceneView: View {
     /// players — no teardown and no re-buffering when you switch cameras.
     private func spotlight(_ cameras: [String], focus rawFocus: Int, in size: CGSize) -> some View {
         let focus = min(max(rawFocus, 0), cameras.count - 1)
-        let stripWidth = min(max(size.width * 0.2, 160), 360)
-        let bigWidth = size.width - stripWidth
         let others = cameras.indices.filter { $0 != focus }
-        let slotHeight = size.height / CGFloat(max(others.count, 1))
+        let slots = CGFloat(max(others.count, 1))
+        // Portrait (a phone held upright): the focused camera fills the top and
+        // the others run as a filmstrip along the bottom. Landscape (iPad / a
+        // TV): big on the left, filmstrip down the right.
+        let portrait = size.height >= size.width
+        let strip = portrait ? min(max(size.height * 0.18, 120), 260)
+                             : min(max(size.width * 0.2, 160), 360)
         return ZStack(alignment: .topLeading) {
             ForEach(Array(cameras.enumerated()), id: \.element) { index, entityId in
                 let isFocus = index == focus
-                let stripSlot = others.firstIndex(of: index) ?? 0
+                let stripSlot = CGFloat(others.firstIndex(of: index) ?? 0) + 0.5
+                let width = isFocus ? (portrait ? size.width : size.width - strip)
+                                    : (portrait ? size.width / slots : strip)
+                let height = isFocus ? (portrait ? size.height - strip : size.height)
+                                     : (portrait ? strip : size.height / slots)
+                let x = isFocus ? (portrait ? size.width / 2 : (size.width - strip) / 2)
+                                : (portrait ? (size.width / slots) * stripSlot : size.width - strip / 2)
+                let y = isFocus ? (portrait ? (size.height - strip) / 2 : size.height / 2)
+                                : (portrait ? size.height - strip / 2 : (size.height / slots) * stripSlot)
                 CameraTileView(entityId: entityId, index: index, compact: !isFocus)
-                    .frame(width: isFocus ? bigWidth : stripWidth,
-                           height: isFocus ? size.height : slotHeight)
+                    .frame(width: width, height: height)
                     #if os(iOS)
-                    // Tap a filmstrip thumbnail to focus it (iOS/iPad).
+                    // Tap the big view to go back to the grid; tap a filmstrip
+                    // thumbnail to switch focus to it (iOS/iPad).
                     .contentShape(Rectangle())
-                    .onTapGesture { if !isFocus { state.cameraSpotlightFocus(index) } }
+                    .onTapGesture {
+                        if isFocus { state.cameraSpotlightExit() }
+                        else { state.cameraSpotlightFocus(index) }
+                    }
                     #endif
-                    .position(
-                        x: isFocus ? bigWidth / 2 : bigWidth + stripWidth / 2,
-                        y: isFocus ? size.height / 2 : slotHeight * (CGFloat(stripSlot) + 0.5)
-                    )
+                    .position(x: x, y: y)
             }
         }
         .animation(.easeInOut(duration: 0.28), value: focus)

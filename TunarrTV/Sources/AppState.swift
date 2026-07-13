@@ -145,14 +145,14 @@ final class AppState: ObservableObject {
     /// Move the spotlight focus by `delta`, wrapping; entering the spotlight
     /// from the grid (nil) lands on the first camera going right, last going left.
     func cameraSpotlightMove(_ delta: Int) {
-        let count = visibleCameraIds.count
+        let count = activeCameraIds.count
         guard count > 0 else { cameraSpotlight = nil; return }
         let current = cameraSpotlight ?? (delta >= 0 ? -1 : 0)
         cameraSpotlight = ((current + delta) % count + count) % count
     }
 
     func cameraSpotlightFocus(_ index: Int) {
-        guard index >= 0, index < visibleCameraIds.count else { return }
+        guard index >= 0, index < activeCameraIds.count else { return }
         cameraSpotlight = index
     }
 
@@ -233,6 +233,13 @@ final class AppState: ObservableObject {
     /// in list order — the add-on config's order wins when present.
     var visibleCameraIds: [String] {
         effectiveCameraIds.filter { !hiddenCameraIds.contains($0) }
+    }
+
+    /// The camera list the cameras channel is actually rendering — demo images
+    /// in demo mode, otherwise the visible HA cameras. Shared by the scene and
+    /// the iOS tap router so grid/spotlight taps map to the right camera.
+    var activeCameraIds: [String] {
+        isDemoMode ? DemoContent.demoCameraIds : visibleCameraIds
     }
 
     var mediaPlayerIds: [String] { Self.parseEntityList(mediaPlayerEntities) }
