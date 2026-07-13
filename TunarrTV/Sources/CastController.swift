@@ -122,6 +122,19 @@ final class CastController: ObservableObject {
         }
     }
 
+    /// Swap the streaming content in place — e.g. the user changes channels on
+    /// the phone while casting. Updates the pending load (so a still-connecting
+    /// session loads the latest) and, if the media app is already up, sends a
+    /// fresh LOAD to the same session.
+    func loadStream(url: URL, title: String) {
+        queue.async {
+            self.pendingLoad = (url, title)
+            if let transport = self.mediaTransportId {
+                self.sendLoad(url: url, title: title, transport: transport)
+            }
+        }
+    }
+
     /// Pause / resume the receiver without tearing the session down.
     func togglePlayPause() {
         queue.async {
