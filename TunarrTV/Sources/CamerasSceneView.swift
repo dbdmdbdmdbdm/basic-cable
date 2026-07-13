@@ -178,11 +178,15 @@ struct CamerasSceneView: View {
                         .frame(width: tileWidth, height: tileHeight)
                         #if os(iOS)
                         // Tap a camera to open it big (iOS/iPad). Applied after
-                        // the frame so the whole cell is the hit target.
+                        // the frame so the whole cell is the hit target. In the
+                        // small guide preview (compact) the tiles take no taps,
+                        // so a tap falls through to the preview's own
+                        // tap-to-fullscreen like every other channel.
                         .contentShape(Rectangle())
                         .onTapGesture {
-                            if index < cameras.count, !compact { state.cameraSpotlightFocus(index) }
+                            if index < cameras.count { state.cameraSpotlightFocus(index) }
                         }
+                        .allowsHitTesting(!compact)
                         #endif
                         #if os(tvOS)
                         // The remote-driven highlight: SELECT opens the ringed
