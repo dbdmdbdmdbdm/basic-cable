@@ -114,6 +114,24 @@ struct CamerasSceneView: View {
                         }
                     }
                 }
+                #if os(tvOS)
+                // tvOS discovery hint: how to open/switch cameras with the
+                // remote. Only on the full wall (grid mode), not once a camera
+                // is already open or in the little guide preview.
+                if !compact, cameras.count >= 2, state.cameraSpotlight == nil {
+                    VStack {
+                        Spacer()
+                        Text("SELECT: OPEN CAMERA   ◀ ▶ MOVE   ▲ ▼ CHANNEL")
+                            .font(Theme.mono(22))
+                            .foregroundColor(.white.opacity(0.9))
+                            .padding(.horizontal, 22)
+                            .padding(.vertical, 12)
+                            .background(Color.black.opacity(0.55))
+                            .cornerRadius(8)
+                            .padding(.bottom, 48)
+                    }
+                }
+                #endif
             }
         }
     }
@@ -164,6 +182,17 @@ struct CamerasSceneView: View {
                         .contentShape(Rectangle())
                         .onTapGesture {
                             if index < cameras.count, !compact { state.cameraSpotlightFocus(index) }
+                        }
+                        #endif
+                        #if os(tvOS)
+                        // The remote-driven highlight: SELECT opens the ringed
+                        // camera; ◀/▶ move the ring. Only on the full-screen
+                        // wall, not the little guide preview.
+                        .overlay {
+                            if !compact, index == state.cameraGridSelection, index < cameras.count {
+                                Rectangle()
+                                    .strokeBorder(Theme.onAir, lineWidth: 6)
+                            }
                         }
                         #endif
                     }

@@ -156,7 +156,25 @@ final class AppState: ObservableObject {
         cameraSpotlight = index
     }
 
-    func cameraSpotlightExit() { cameraSpotlight = nil }
+    func cameraSpotlightExit() {
+        #if os(tvOS)
+        // Keep the grid highlight on the camera we were just watching.
+        if let focus = cameraSpotlight { cameraGridSelection = focus }
+        #endif
+        cameraSpotlight = nil
+    }
+
+    #if os(tvOS)
+    /// tvOS has no touch, so the cameras grid carries a highlight the remote
+    /// moves with ◀/▶; SELECT then spotlights the highlighted camera.
+    @Published var cameraGridSelection = 0
+
+    func cameraGridSelectionMove(_ delta: Int) {
+        let count = activeCameraIds.count
+        guard count > 0 else { cameraGridSelection = 0; return }
+        cameraGridSelection = ((cameraGridSelection + delta) % count + count) % count
+    }
+    #endif
 
     #if os(iOS)
     /// Chromecast sender (open-source CASTV2, no Google SDK). iOS/iPad only.
@@ -1250,7 +1268,12 @@ final class AppState: ObservableObject {
         tunedChannel = channel
         isPaused = false
         // Leaving (or re-tuning) the cameras channel drops back to the grid.
-        if channel.id != previous?.id { cameraSpotlight = nil }
+        if channel.id != previous?.id {
+            cameraSpotlight = nil
+            #if os(tvOS)
+            cameraGridSelection = 0
+            #endif
+        }
         UserDefaults.standard.set(channel.id, forKey: "lastChannelId")
         // NOTE: no explicit session teardown on tune-away. Tunarr 1.3.8's
         // DELETE /channels/:id/sessions removes the session record but
