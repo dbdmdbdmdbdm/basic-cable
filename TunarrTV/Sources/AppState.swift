@@ -203,6 +203,9 @@ final class AppState: ObservableObject {
     private var prefetchTask: Task<Void, Never>?
     private var lastPrefetchedChannelId: String?
     private var itemFailureWatch: AnyCancellable?
+    #if os(tvOS)
+    private var idleTimerWatch: AnyCancellable?
+    #endif
     #if os(iOS)
     private var castWatch: AnyCancellable?
     private var castPauseGuard: AnyCancellable?
@@ -519,6 +522,20 @@ final class AppState: ObservableObject {
             .map { $0 == .waitingToPlayAtSpecifiedRate }
             .assign(to: &$isBuffering)
 
+        #if os(tvOS)
+        // Keep the tvOS screensaver from cutting in while a channel is on.
+        // preventsDisplaySleepDuringVideoPlayback doesn't cover the client-
+        // rendered synthetic channels (no AVPlayer video) and the screensaver
+        // still fires on some live streams, so disable the system idle timer
+        // explicitly whenever a channel is tuned and playing. Re-evaluated on
+        // every play/pause and channel change.
+        let playState = player.publisher(for: \.timeControlStatus).map { _ in () }.eraseToAnyPublisher()
+        let channelState = $tunedChannel.map { _ in () }.eraseToAnyPublisher()
+        idleTimerWatch = playState.merge(with: channelState)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.refreshIdleTimer() }
+        #endif
+
         #if os(iOS)
         // Chromecast plays the stream itself on the TV, so the phone must stop
         // playing the same channel locally — otherwise it runs in both places
@@ -569,6 +586,17 @@ final class AppState: ObservableObject {
         case .connecting, .casting: return true
         case .idle, .discovering, .failed: return false
         }
+    }
+    #endif
+
+    #if os(tvOS)
+    /// Disable the system idle timer (and thus the screensaver) while a channel
+    /// is tuned and playing — live video/audio (anything but a paused player) or
+    /// a continuously-rendered synthetic channel.
+    private func refreshIdleTimer() {
+        let playing = tunedChannel != nil
+            && (isSyntheticTuned || player.timeControlStatus != .paused)
+        UIApplication.shared.isIdleTimerDisabled = playing
     }
     #endif
 
