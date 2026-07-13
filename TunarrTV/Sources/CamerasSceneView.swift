@@ -132,7 +132,11 @@ struct CamerasSceneView: View {
     }
 
     private func grid(_ cameras: [String], in size: CGSize) -> some View {
-        let columns = cameras.count == 1 ? 1 : (cameras.count <= 4 ? 2 : 3)
+        // A portrait phone (fullscreen) stacks the cameras in one full-width
+        // column so each keeps its shape; the wall (2×2 / 3×3) is for the
+        // landscape/TV/iPad screen and the small guide preview.
+        let portrait = !compact && size.height > size.width
+        let columns = portrait ? 1 : (cameras.count == 1 ? 1 : (cameras.count <= 4 ? 2 : 3))
         let rows = Int(ceil(Double(cameras.count) / Double(columns)))
         let slots = rows * columns
         let tileWidth = size.width / CGFloat(columns)
