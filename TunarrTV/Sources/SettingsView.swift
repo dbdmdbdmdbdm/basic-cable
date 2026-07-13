@@ -106,6 +106,9 @@ struct SettingsView: View {
 
                 field("TUNARR SERVER URL", placeholder: "http://192.168.1.100:8000", text: $urlText)
 
+                caption("Watching away from home? Put this device and your server on the same VPN — Tailscale has a native tvOS/iOS app and is easiest — then enter the server's Tailscale MagicDNS name here (e.g. http://tunarr.your-tailnet.ts.net:8000). One name works both at home and away. See \"Remote access\" in the GitHub README.")
+                    .frame(maxWidth: 1000)
+
                 if let testResult {
                     Text(testResult)
                         .font(Theme.mono(22 * uiScale))

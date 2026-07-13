@@ -46,10 +46,26 @@ Everything the app does is three plain HTTP calls against that base URL:
 
 Notes:
 
-- **Plain HTTP is fine on your LAN.** The app sets the `NSAllowsLocalNetworking` App Transport Security exception, so cleartext HTTP works to private/LAN addresses (RFC-1918 IPs, link-local, and `.local` names) — where most Tunarr servers live. HTTPS URLs work anywhere. If you reach your server via a custom local hostname (e.g. `http://tunarr.home`), use its IP address or HTTPS instead, since ATS still enforces HTTPS for non-`.local` hostnames.
-- **No authentication.** Tunarr currently has no auth, so the app sends none. Don't expose your Tunarr server to the internet; if you want out-of-home access, use a VPN (WireGuard/Tailscale).
+- **Plain HTTP is fine on your LAN.** The app sets the `NSAllowsLocalNetworking` App Transport Security exception, so cleartext HTTP works to private/LAN addresses (RFC-1918 IPs, link-local, and `.local` names) — where most Tunarr servers live. HTTPS URLs work anywhere. If you reach your server via a custom local hostname (e.g. `http://tunarr.home`), use its IP address or HTTPS instead, since ATS still enforces HTTPS for non-`.local` hostnames. (Plain HTTP over a Tailscale MagicDNS name also works — see [Remote access](#remote-access-out-of-home).)
+- **No authentication.** Tunarr currently has no auth, so the app sends none. Don't expose your Tunarr server to the internet. For out-of-home access, put your Apple TV and server on the same VPN — see [Remote access](#remote-access-out-of-home) below.
 - **Channel-change latency.** Tuning a channel takes roughly 10–15 seconds while Tunarr spins up the ffmpeg session server-side (a "TUNING" indicator shows during this). This is the same latency any Tunarr client has, including Plex.
 - The app is read-only against Tunarr — it never modifies your server's channels or settings.
+
+## Remote access (out of home)
+
+Basic Cable talks to servers **on your home network** — not just Tunarr, but also Home Assistant (weather, dashboards, cameras), Immich (photos), and ha-screencap. None of them have authentication meant for the open internet, so the app is designed for the LAN. To watch from outside the house, don't port-forward any of these — instead put your Apple TV (or iPhone/iPad) and your home network on the same **VPN**, so the app keeps talking to the same private addresses as if it were at home. Every channel — Tunarr, weather, dashboards, cameras, photos — then works remotely with **no change to the app's settings**.
+
+A full VPN app on the device is deliberately *not* built into Basic Cable: iOS/tvOS already have first-class VPN clients that do this better than an embedded tunnel could, and running one system-wide fixes every app at once, not just this one. The recommended setup:
+
+1. **[Tailscale](https://tailscale.com)** is the easiest — it has a **native tvOS and iOS app**. Install it on the Apple TV (and your phone), sign in to the same tailnet as a machine on your home network (or a [subnet router](https://tailscale.com/kb/1019/subnets)), and enable **[MagicDNS](https://tailscale.com/kb/1081/magicdns)**.
+2. In Basic Cable's **Settings**, set your server URL to the server's **MagicDNS name** instead of its LAN IP — e.g. `http://tunarr.your-tailnet.ts.net:8000`. That one hostname resolves correctly **both at home and away**, so you can leave it set all the time; there's no "home vs away" switch to flip.
+3. Do the same for the Home Assistant / Immich / ha-screencap URLs if you use those channels.
+
+Notes:
+
+- **Use the MagicDNS hostname, not the raw `100.x.y.z` Tailscale IP.** The app carries an ATS exception for `*.ts.net` so plain **HTTP over a MagicDNS name works**, but Tailscale's `100.64.0.0/10` (CGNAT) IP literals aren't covered by that exception and ATS will block cleartext HTTP to them. A MagicDNS name (or HTTPS) avoids this entirely.
+- **[WireGuard](https://www.wireguard.com/) works too** if you'd rather run your own tunnel (it also has a tvOS app). Once connected you reach the server at its normal LAN IP, so the existing `NSAllowsLocalNetworking` exception already covers plain HTTP — no MagicDNS needed.
+- Tailscale's relay is fine for the app's API calls, but live video wants a **direct** connection for bandwidth. A subnet router at home and a direct (non-relayed) path give the best results.
 
 ## Server sizing & troubleshooting
 

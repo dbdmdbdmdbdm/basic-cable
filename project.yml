@@ -44,6 +44,10 @@ targets:
           - PressStart2P-Regular.ttf
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+          NSExceptionDomains:
+            ts.net:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSIncludesSubdomains: true
         NSLocalNetworkUsageDescription: Connects to your Tunarr server on the local network to stream channels.
         NSLocationWhenInUseUsageDescription: Used to show your local forecast on the weather channel.
     settings:
@@ -88,6 +92,10 @@ targets:
           - UIInterfaceOrientationLandscapeRight
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+          NSExceptionDomains:
+            ts.net:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSIncludesSubdomains: true
         NSLocalNetworkUsageDescription: Connects to your Tunarr server and discovers Chromecast devices on your local network.
         NSLocationWhenInUseUsageDescription: Used to show your local forecast on the weather channel.
         NSBonjourServices:
