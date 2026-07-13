@@ -1202,7 +1202,8 @@ final class AppState: ObservableObject {
                 }
                 weatherData = WeatherData(current: current, days: days, houseSensors: sensors,
                                           locationName: locationName, fetchedAt: Date(),
-                                          source: source ?? "HOME ASSISTANT")
+                                          source: source ?? "HOME ASSISTANT",
+                                          creditRequired: false)
                 return
             }
         }

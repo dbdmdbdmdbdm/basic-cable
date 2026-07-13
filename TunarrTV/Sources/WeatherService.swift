@@ -32,10 +32,12 @@ struct WeatherData {
     /// "City, ST" for the forecast coordinates (reverse-geocoded, cached).
     var locationName: String?
     var fetchedAt = Date.distantPast
-    /// Attribution shown on the channel — Open-Meteo's CC BY 4.0 license
-    /// requires credit when it's the source; an HA weather entity credits
-    /// its own provider instead.
+    /// The forecast source, e.g. "OPEN-METEO.COM".
     var source = "OPEN-METEO.COM"
+    /// Whether the channel must credit the source on-screen. Open-Meteo's
+    /// CC BY 4.0 license requires it; an HA weather entity does not, so the
+    /// ticker stays clean when the data comes from Home Assistant.
+    var creditRequired = true
 
     var hasForecast: Bool { current != nil && !days.isEmpty }
 }

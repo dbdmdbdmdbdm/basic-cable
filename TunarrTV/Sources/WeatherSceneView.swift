@@ -191,13 +191,12 @@ struct WeatherSceneView: View {
     }
 
     private var tickerText: String {
-        // Names the actual source: Open-Meteo (CC BY 4.0 requires credit)
-        // or the configured HA weather entity's provider.
-        let source = state.weatherData.source
-        if let location = state.weatherData.locationName {
-            return "\(location.uppercased()) · WEATHER DATA BY \(source)"
-        }
-        return "LOCAL FORECAST · WEATHER DATA BY \(source)"
+        let base = state.weatherData.locationName?.uppercased() ?? "LOCAL FORECAST"
+        // Credit the source only when required (Open-Meteo's CC BY 4.0). Data
+        // from a Home Assistant weather entity needs no attribution, so the
+        // ticker just shows the location.
+        guard state.weatherData.creditRequired else { return base }
+        return "\(base) · WEATHER DATA BY \(state.weatherData.source)"
     }
 
     private var tickerBar: some View {
