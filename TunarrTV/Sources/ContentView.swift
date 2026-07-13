@@ -69,6 +69,8 @@ struct ContentView: View {
                     .frame(width: 660, height: 371)
                     InfoPanelView()
                         .frame(height: 371)
+                    GuideStatusPanel()
+                        .frame(width: 340, height: 371)
                 }
                 GuideView()
             }
@@ -160,6 +162,8 @@ struct ContentView: View {
 
                     InfoPanelView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    GuideStatusPanel(scale: 0.62)
+                        .frame(width: 220)
                 }
                 .frame(height: topHeight)
 
