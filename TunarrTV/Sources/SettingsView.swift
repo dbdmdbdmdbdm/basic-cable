@@ -106,6 +106,8 @@ struct SettingsView: View {
 
                 field("TUNARR SERVER URL", placeholder: "http://192.168.1.100:8000", text: $urlText)
 
+                caption("Away from home? Run a VPN like Tailscale on this device and enter your server's MagicDNS name, e.g. http://tunarr.your-tailnet.ts.net:8000 — plain HTTP to *.ts.net is allowed. A raw 100.x Tailscale IP needs HTTPS.")
+
                 if let testResult {
                     Text(testResult)
                         .font(Theme.mono(22 * uiScale))

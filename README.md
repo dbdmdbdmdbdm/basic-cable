@@ -47,9 +47,18 @@ Everything the app does is three plain HTTP calls against that base URL:
 Notes:
 
 - **Plain HTTP is fine on your LAN.** The app sets the `NSAllowsLocalNetworking` App Transport Security exception, so cleartext HTTP works to private/LAN addresses (RFC-1918 IPs, link-local, and `.local` names) — where most Tunarr servers live. HTTPS URLs work anywhere. If you reach your server via a custom local hostname (e.g. `http://tunarr.home`), use its IP address or HTTPS instead, since ATS still enforces HTTPS for non-`.local` hostnames.
-- **No authentication.** Tunarr currently has no auth, so the app sends none. Don't expose your Tunarr server to the internet; if you want out-of-home access, use a VPN (WireGuard/Tailscale).
+- **No authentication.** Tunarr currently has no auth, so the app sends none. Don't expose your Tunarr server to the internet; if you want out-of-home access, use a VPN — see [Remote access (out of home)](#remote-access-out-of-home) below.
 - **Channel-change latency.** Tuning a channel takes roughly 10–15 seconds while Tunarr spins up the ffmpeg session server-side (a "TUNING" indicator shows during this). This is the same latency any Tunarr client has, including Plex.
 - The app is read-only against Tunarr — it never modifies your server's channels or settings.
+
+## Remote access (out of home)
+
+Basic Cable is LAN-only by design. Tunarr, Home Assistant, Immich, and the ha-screencap companion all have no internet-facing authentication, so the app never talks to a public server — and it deliberately does **not** bundle its own tunnel or route through a cloud relay. The supported way to watch away from home is a **system-wide VPN back to your own network**:
+
+- **[Tailscale](https://tailscale.com) (recommended).** Install it on the Apple TV / iPhone / iPad and on the machine running Tunarr, both on the same tailnet. Then enter your server by its **MagicDNS name** — e.g. `http://tunarr.your-tailnet.ts.net:8000` — exactly as you would the LAN URL. The app ships an App Transport Security exception for `*.ts.net`, so plain-HTTP MagicDNS names connect without HTTPS.
+- **WireGuard / other VPNs** work too. Once the VPN is up, your LAN IPs (`http://192.168.x.x:8000`) are reachable directly and covered by the standard `NSAllowsLocalNetworking` exception.
+
+**ATS caveat — use the MagicDNS name, not the raw IP.** Tailscale hands out addresses in the `100.64.0.0/10` CGNAT range, which ATS does *not* treat as local networking. A bare `http://100.x.y.z:8000` URL is therefore blocked for cleartext HTTP; the `*.ts.net` MagicDNS hostname is what the ATS exception whitelists. Prefer the hostname (it's stable across reconnects anyway), or use HTTPS if you must use the IP.
 
 ## Server sizing & troubleshooting
 
