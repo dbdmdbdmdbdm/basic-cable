@@ -142,7 +142,14 @@ struct FullscreenPlayerIOS: View {
             }
 
             if showControls {
+                // Keep the controls inside the safe area so the top button row
+                // clears the Dynamic Island / notch (otherwise the Cast and
+                // AirPlay buttons render underneath it and vanish) and the zap
+                // chevrons clear the home indicator. The video/scene layers
+                // below still bleed full-screen via their own .ignoresSafeArea().
                 controls
+                    .padding(.top, geo.safeAreaInsets.top)
+                    .padding(.bottom, geo.safeAreaInsets.bottom)
             }
         }
         .ignoresSafeArea()
@@ -206,16 +213,22 @@ struct FullscreenPlayerIOS: View {
                     .cornerRadius(6)
                 }
                 Spacer()
-                // Cast: send the live channel to a Chromecast on the LAN.
-                CastButton(controller: state.cast,
-                           streamURL: state.castableStreamURL,
-                           title: state.castableChannelTitle)
-                // AirPlay: hand the stream off to an Apple TV / AirPlay 2 receiver.
-                AirPlayButton()
-                    .frame(width: 24, height: 24)
-                    .frame(width: 48, height: 48)
-                    .background(Color.black.opacity(0.6))
-                    .clipShape(Circle())
+                // Cast / AirPlay only apply to a live Tunarr stream. Synthetic
+                // channels (weather/cameras/photos/dashboards) render on-device
+                // with no AVPlayer stream to hand off, so hide the dead controls
+                // there rather than leave them non-functional over the scene.
+                if !state.isSyntheticTuned {
+                    // Cast: send the live channel to a Chromecast on the LAN.
+                    CastButton(controller: state.cast,
+                               streamURL: state.castableStreamURL,
+                               title: state.castableChannelTitle)
+                    // AirPlay: hand the stream off to an Apple TV / AirPlay 2 receiver.
+                    AirPlayButton()
+                        .frame(width: 24, height: 24)
+                        .frame(width: 48, height: 48)
+                        .background(Color.black.opacity(0.6))
+                        .clipShape(Circle())
+                }
                 Button {
                     state.tickerEnabled.toggle()
                     if state.tickerEnabled {
