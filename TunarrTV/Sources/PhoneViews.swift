@@ -141,16 +141,6 @@ struct FullscreenPlayerIOS: View {
                 }
             }
 
-            // While a Chromecast session is live the stream plays on the TV and
-            // the local player is paused (see AppState.castWatch) — cover the
-            // frozen frame with a casting card. Hit-testing off so a tap still
-            // falls through to toggle the controls (and reach STOP CASTING).
-            if let castName = castingDeviceName, !state.isSyntheticTuned {
-                CastingOverlayIOS(deviceName: castName)
-                    .ignoresSafeArea()
-                    .allowsHitTesting(false)
-            }
-
             if showControls {
                 // Keep the controls inside the safe area so the top button row
                 // clears the Dynamic Island / notch (otherwise the Cast and
@@ -160,6 +150,14 @@ struct FullscreenPlayerIOS: View {
                 controls
                     .padding(.top, geo.safeAreaInsets.top)
                     .padding(.bottom, geo.safeAreaInsets.bottom)
+            }
+
+            // While a Chromecast session is live the stream plays on the TV and
+            // the phone is paused (AppState.castWatch). Cover the frozen frame
+            // with an interactive casting card — it's the control surface (stop,
+            // play/pause, channel ±), so it sits on top of everything.
+            if let castName = castingDeviceName {
+                CastingOverlayIOS(deviceName: castName)
             }
         }
         .ignoresSafeArea()
@@ -317,31 +315,72 @@ struct FullscreenPlayerIOS: View {
 }
 
 /// Shown over the (paused) local player while casting to a Chromecast: the
-/// stream is playing on the TV, so the phone shows a status card instead of
-/// running the same video a second time.
+/// stream plays on the TV, so the phone shows a status + control card instead
+/// of running the same video a second time. This is the cast control surface —
+/// stop, play/pause, and channel changes all route to the receiver.
 private struct CastingOverlayIOS: View {
+    @EnvironmentObject var state: AppState
     let deviceName: String
+
     var body: some View {
         ZStack {
-            Color.black.opacity(0.94)
-            VStack(spacing: 18) {
+            Color.black.opacity(0.94).ignoresSafeArea()
+            VStack(spacing: 16) {
                 Image(systemName: "tv.fill")
-                    .font(.system(size: 52))
+                    .font(.system(size: 48))
                     .foregroundColor(Theme.onAir)
                 Text("CASTING TO")
-                    .font(Theme.mono(15))
+                    .font(Theme.mono(14))
                     .foregroundColor(Theme.dimText)
                 Text(deviceName.uppercased())
-                    .font(Theme.mono(26, weight: .medium))
+                    .font(Theme.mono(24, weight: .medium))
                     .foregroundColor(.white)
                     .multilineTextAlignment(.center)
-                Text("PLAYING ON YOUR TV")
-                    .font(Theme.mono(13))
-                    .foregroundColor(Theme.dimText)
-                    .padding(.top, 4)
+
+                if let channel = state.tunedChannel {
+                    Text("\(channel.number)  \(channel.name.uppercased())")
+                        .font(Theme.mono(16))
+                        .foregroundColor(.white.opacity(0.85))
+                        .padding(.top, 6)
+                    if let entry = state.nowPlaying(on: channel) {
+                        Text(entry.title.uppercased())
+                            .font(Theme.mono(12, weight: .medium))
+                            .foregroundColor(Theme.dimText)
+                            .lineLimit(1)
+                    }
+                }
+
+                HStack(spacing: 26) {
+                    ctl("chevron.down") { state.channelDown() }
+                    ctl(state.cast.isPaused ? "play.fill" : "pause.fill") { state.cast.togglePlayPause() }
+                    ctl("stop.fill", tint: Theme.accent) { state.cast.stopCasting() }
+                    ctl("chevron.up") { state.channelUp() }
+                }
+                .padding(.top, 14)
+
+                Button { state.isFullscreen = false } label: {
+                    Text("EXIT FULLSCREEN")
+                        .font(Theme.mono(13))
+                        .foregroundColor(Theme.dimText)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 6)
             }
             .padding(40)
         }
+    }
+
+    private func ctl(_ symbol: String, tint: Color = .white, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 22, weight: .bold))
+                .foregroundColor(tint)
+                .frame(width: 60, height: 60)
+                .background(Color.white.opacity(0.12))
+                .clipShape(Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
     }
 }
 #endif

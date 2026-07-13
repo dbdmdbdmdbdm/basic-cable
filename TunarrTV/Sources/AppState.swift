@@ -205,6 +205,9 @@ final class AppState: ObservableObject {
     private var itemFailureWatch: AnyCancellable?
     #if os(iOS)
     private var castWatch: AnyCancellable?
+    private var castPauseGuard: AnyCancellable?
+    private var castFollowWatch: AnyCancellable?
+    private var castRepublish: AnyCancellable?
     #endif
     private var pendingTune: Task<Void, Never>?
     private var retryCount = 0
@@ -526,19 +529,48 @@ final class AppState: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] status in
                 guard let self else { return }
-                let casting: Bool
-                switch status {
-                case .connecting, .casting: casting = true
-                case .idle, .discovering, .failed: casting = false
-                }
-                if casting {
+                if self.castActive {
                     self.player.pause()
                 } else if self.player.currentItem != nil, self.isFullscreen {
                     self.player.play()
                 }
             }
+        // A tune() during a cast session calls player.play() — re-pause so the
+        // phone never plays alongside the TV, no matter where play came from.
+        castPauseGuard = player.publisher(for: \.timeControlStatus)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                guard let self, self.castActive, status == .playing else { return }
+                self.player.pause()
+            }
+        // Follow channel changes on the cast: when the tuned channel settles on
+        // a live (castable) channel while casting, swap the TV's stream to it.
+        // Debounced so surfing doesn't fire a LOAD per press.
+        castFollowWatch = $tunedChannel
+            .debounce(for: .milliseconds(700), scheduler: DispatchQueue.main)
+            .sink { [weak self] channel in
+                guard let self, self.castActive, let channel, let client = self.client,
+                      !self.isDemoMode, !Self.isSyntheticChannel(channel.id) else { return }
+                self.cast.loadStream(url: client.streamURL(for: channel), title: self.castableChannelTitle)
+            }
+        // CastController is a nested ObservableObject — republish its changes so
+        // views observing AppState (the casting card, the cast button state) redraw
+        // when the cast status / paused flag changes.
+        castRepublish = cast.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.objectWillChange.send() }
         #endif
     }
+
+    #if os(iOS)
+    /// A Chromecast session is connecting or actively playing.
+    var castActive: Bool {
+        switch cast.status {
+        case .connecting, .casting: return true
+        case .idle, .discovering, .failed: return false
+        }
+    }
+    #endif
 
     // MARK: - Settings persistence & iCloud sync
 
