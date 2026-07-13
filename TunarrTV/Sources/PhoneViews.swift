@@ -85,8 +85,18 @@ struct FullscreenPlayerIOS: View {
             Color.black.ignoresSafeArea()
 
             if state.isSyntheticTuned {
-                SyntheticChannelView(scale: 0.55)
-                    .ignoresSafeArea()
+                // The cameras channel handles taps on the tiles themselves
+                // (open a camera / switch / back to the grid), so the swipe
+                // rides on the scene and there's no tap layer over it. Other
+                // synthetic channels use the shared tap layer below.
+                if state.isCamerasTuned {
+                    SyntheticChannelView(scale: 0.55)
+                        .ignoresSafeArea()
+                        .simultaneousGesture(cameraSwipeGesture)
+                } else {
+                    SyntheticChannelView(scale: 0.55)
+                        .ignoresSafeArea()
+                }
             } else {
                 PlayerLayerView(player: state.player)
                     .ignoresSafeArea()
@@ -99,45 +109,27 @@ struct FullscreenPlayerIOS: View {
                 }
             }
 
-            // Tap + swipe layer, under the controls. On the cameras channel in
-            // spotlight it stops short of the filmstrip, so a tap on a thumbnail
-            // falls through to it (tap-to-focus) instead of toggling controls.
-            let camStripWidth = (state.isCamerasTuned && state.cameraSpotlight != nil)
-                ? min(max(geo.size.width * 0.2, 160), 360) : 0
-            HStack(spacing: 0) {
+            // Tap toggles controls; swipe up/down zaps. Excluded on cameras —
+            // there the tiles handle taps and the scene handles the swipe.
+            if !state.isCamerasTuned {
                 Color.clear
                     .contentShape(Rectangle())
+                    .ignoresSafeArea()
                     .onTapGesture {
                         withAnimation { showControls.toggle() }
                         if showControls { scheduleHide() }
                     }
-                    // Swipe up/down to zap; on cameras, left/right walks the spotlight.
                     .gesture(
                         DragGesture(minimumDistance: 40)
                             .onEnded { value in
-                                let dx = value.translation.width
                                 let dy = value.translation.height
-                                if state.isCamerasTuned, abs(dx) > abs(dy), abs(dx) > 60 {
-                                    state.cameraSpotlightMove(dx < 0 ? 1 : -1)
-                                    withAnimation { showControls = true }
-                                    scheduleHide()
-                                    return
-                                }
-                                guard abs(dy) > 60, abs(dy) > abs(dx) else { return }
-                                if dy < 0 {
-                                    state.channelUp()
-                                } else {
-                                    state.channelDown()
-                                }
+                                guard abs(dy) > 60, abs(dy) > abs(value.translation.width) else { return }
+                                if dy < 0 { state.channelUp() } else { state.channelDown() }
                                 withAnimation { showControls = true }
                                 scheduleHide()
                             }
                     )
-                if camStripWidth > 0 {
-                    Color.clear.frame(width: camStripWidth).allowsHitTesting(false)
-                }
             }
-            .ignoresSafeArea()
 
             // Content stays within the safe area (rounded corners, home
             // indicator would clip it); the bar's background still bleeds
@@ -157,7 +149,25 @@ struct FullscreenPlayerIOS: View {
         }
         .statusBarHidden()
         .persistentSystemOverlays(.hidden)
-        .onAppear { scheduleHide() }
+        .onAppear { if state.isCamerasTuned { showControls = true } else { scheduleHide() } }
+        // Cameras keep the controls up (taps open cameras, not the controls),
+        // so make sure they're showing whenever the cameras channel is tuned.
+        .onChange(of: state.isCamerasTuned) { _, cameras in
+            if cameras { withAnimation { showControls = true } } else { scheduleHide() }
+        }
+    }
+
+    /// Cameras channel: horizontal swipe walks the spotlight, vertical zaps.
+    private var cameraSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 40).onEnded { value in
+            let dx = value.translation.width
+            let dy = value.translation.height
+            if abs(dx) > abs(dy), abs(dx) > 60 {
+                state.cameraSpotlightMove(dx < 0 ? 1 : -1)
+            } else if abs(dy) > 60 {
+                if dy < 0 { state.channelUp() } else { state.channelDown() }
+            }
+        }
     }
 
     private var controls: some View {
@@ -264,6 +274,8 @@ struct FullscreenPlayerIOS: View {
 
     private func scheduleHide() {
         hideTask?.cancel()
+        // Cameras keep the controls up (taps open cameras, not the controls).
+        if state.isCamerasTuned { return }
         hideTask = Task {
             try? await Task.sleep(nanoseconds: 4_000_000_000)
             if !Task.isCancelled {
