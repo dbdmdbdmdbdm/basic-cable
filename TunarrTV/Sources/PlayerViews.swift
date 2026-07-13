@@ -82,8 +82,8 @@ struct FullscreenPlayerView: View {
         .onTapGesture {
             guard !showQuickPanel else { return }
             if state.isCamerasTuned {
-                // Select toggles the camera spotlight rather than exiting.
-                if state.cameraSpotlight == nil { state.cameraSpotlightMove(1) }
+                // Select opens the highlighted camera (or backs out of one).
+                if state.cameraSpotlight == nil { state.cameraSpotlightFocus(state.cameraGridSelection) }
                 else { state.cameraSpotlightExit() }
             } else {
                 state.isFullscreen = false
@@ -102,8 +102,14 @@ struct FullscreenPlayerView: View {
                 switch direction {
                 case .up: state.channelUp(); showBanner()
                 case .down: state.channelDown(); showBanner()
-                case .left: state.cameraSpotlightMove(-1)
-                case .right: state.cameraSpotlightMove(1)
+                // In the grid, ◀/▶ walk the highlight; once a camera is open
+                // they switch which camera is spotlighted.
+                case .left:
+                    if state.cameraSpotlight == nil { state.cameraGridSelectionMove(-1) }
+                    else { state.cameraSpotlightMove(-1) }
+                case .right:
+                    if state.cameraSpotlight == nil { state.cameraGridSelectionMove(1) }
+                    else { state.cameraSpotlightMove(1) }
                 @unknown default: break
                 }
                 return
