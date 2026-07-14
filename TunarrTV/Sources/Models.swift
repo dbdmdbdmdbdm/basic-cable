@@ -11,20 +11,82 @@ enum WeatherChannel {
 /// the network runs the browser and this channel displays its snapshots).
 enum HADashboardChannel {
     static let id = "hadash-local"
-    static let number = 998
+    static let number = 996
 }
 
 /// Synthetic channel showing a slideshow of Immich favorite photos.
 enum PhotosChannel {
     static let id = "photos-local"
-    static let number = 997
+    static let number = 998
 }
 
 /// Synthetic channel showing a live multi-camera grid, streamed straight
 /// from Home Assistant's camera entities over HLS.
 enum CamerasChannel {
     static let id = "cameras-local"
-    static let number = 951
+    static let number = 997
+}
+
+/// A camera configured for the security-camera channel. Each comma-separated
+/// entry in settings is either a Home Assistant entity id — streamed through
+/// HA's `camera/stream` API, the zero-setup default — or a direct HLS URL the
+/// user supplies to bypass Home Assistant entirely. Point a direct entry at a
+/// local go2rtc / MediaMTX / Frigate remux and the grid never touches HA's
+/// transcoder, which is the difference between a responsive hub and a pegged
+/// one when the whole wall is live at once.
+///
+/// Direct entries take the form `Name=https://host/stream.m3u8`; a bare URL
+/// works too, with the name derived from its path. Playback is AVPlayer, so
+/// the direct URL must be **HLS** — RTSP is intentionally unsupported (remux
+/// to HLS on your own box). Entity and direct cameras mix freely in one list.
+enum CameraSource: Equatable {
+    case entity(String)
+    case direct(name: String, url: URL)
+
+    /// Classifies one raw settings token. Mirrors the dashboard channel's
+    /// `NAME=URL` parsing: an entry carrying a URL scheme is a direct stream,
+    /// anything else is treated as an entity id.
+    init(token raw: String) {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        var name = ""
+        var urlText = trimmed
+        // "NAME=URL" — but never split inside a bare URL's query string.
+        if let eq = trimmed.firstIndex(of: "="), !trimmed[..<eq].contains("://") {
+            name = String(trimmed[..<eq]).trimmingCharacters(in: .whitespaces)
+            urlText = String(trimmed[trimmed.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
+        }
+        if urlText.contains("://"), let url = URL(string: urlText), url.scheme != nil {
+            self = .direct(name: name.isEmpty ? Self.derivedName(from: url) : name, url: url)
+        } else {
+            self = .entity(trimmed)
+        }
+    }
+
+    /// Entity cameras need the Home Assistant URL and token; direct URLs don't.
+    var needsHomeAssistant: Bool {
+        if case .entity = self { return true }
+        return false
+    }
+
+    /// The uppercase label shown on the monitor and in the settings toggles.
+    var displayName: String {
+        switch self {
+        case .entity(let id):
+            let raw = id.split(separator: ".").last.map(String.init) ?? id
+            return raw.replacingOccurrences(of: "_", with: " ").uppercased()
+        case .direct(let name, _):
+            return name.uppercased()
+        }
+    }
+
+    /// A readable name pulled from a URL when the user didn't label it: the
+    /// last path component without its extension, falling back to the host.
+    private static func derivedName(from url: URL) -> String {
+        let stem = url.deletingPathExtension().lastPathComponent
+        let candidate = stem.isEmpty ? (url.host ?? "camera") : stem
+        return candidate.replacingOccurrences(of: "_", with: " ")
+                        .replacingOccurrences(of: "-", with: " ")
+    }
 }
 
 struct Channel: Identifiable, Decodable, Hashable {

@@ -63,7 +63,7 @@ The same options in YAML form:
 app_config_enabled: true
 dash_names:                    # names for dash_paths, in order — the app
   - Home                       # turns each captured dashboard into its own
-  - Kitchen                    # channel automatically (998, then 996 down)
+  - Kitchen                    # channel automatically (996, then down)
 cameras:                       # security channel — list order = grid order
   - camera.front_door
   - camera.backyard
