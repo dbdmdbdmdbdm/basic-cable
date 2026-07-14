@@ -1,6 +1,6 @@
 # ha-screencap
 
-Companion service for Basic Cable's **Home Dashboard channel** (channel 998).
+Companion service for Basic Cable's **Home Dashboard channel** (channel 996).
 
 Apple TV has no web engine — there is no WebView on tvOS — so the app can't
 render a Home Assistant dashboard itself. This tiny container runs headless

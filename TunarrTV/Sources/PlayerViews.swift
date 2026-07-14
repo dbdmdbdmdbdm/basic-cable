@@ -39,104 +39,125 @@ struct FullscreenPlayerView: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            if state.isSyntheticTuned {
-                SyntheticChannelView()
-                    .ignoresSafeArea()
-            } else {
-                PlayerLayerView(player: state.player)
-                    .ignoresSafeArea()
-
-                if state.isBuffering, let channel = state.tunedChannel {
-                    TuningIndicator(channel: channel)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Player layer — owns channel zapping and its remote gestures. The
+            // quick panel is deliberately a SIBLING of this (below), not a
+            // child: that keeps the panel's toggles outside this view's
+            // .onMoveCommand scope, so the focus engine — not the channel
+            // zapper — drives up/down navigation between the toggles.
+            ZStack(alignment: .topLeading) {
+                if state.isSyntheticTuned {
+                    SyntheticChannelView()
                         .ignoresSafeArea()
-                } else if let trouble = state.streamTrouble, let channel = state.tunedChannel {
-                    StreamTroubleIndicator(channel: channel, trouble: trouble)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    PlayerLayerView(player: state.player)
                         .ignoresSafeArea()
+
+                    if state.isBuffering, let channel = state.tunedChannel {
+                        TuningIndicator(channel: channel)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .ignoresSafeArea()
+                    } else if let trouble = state.streamTrouble, let channel = state.tunedChannel {
+                        StreamTroubleIndicator(channel: channel, trouble: trouble)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .ignoresSafeArea()
+                    }
+                }
+
+                if state.tickerEnabled {
+                    VStack {
+                        Spacer()
+                        ChannelTickerView()
+                    }
+                    .ignoresSafeArea()
+                }
+
+                if bannerVisible, let channel = state.tunedChannel {
+                    banner(for: channel)
+                        .padding(48)
+                        .transition(.opacity)
                 }
             }
-
-            if state.tickerEnabled {
-                VStack {
-                    Spacer()
-                    ChannelTickerView()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Not focusable while the panel is open, so focus can't leak back
+            // here from the panel's toggles and let .onMoveCommand hijack the
+            // D-pad (which was zapping channels instead of driving the menu).
+            .focusable(!showQuickPanel)
+            .focused($focused)
+            // Select press returns to the guide (Menu via onExitCommand does
+            // too); press-and-hold select opens quick options instead.
+            .onTapGesture {
+                guard !showQuickPanel else { return }
+                if state.isCamerasTuned {
+                    // Select opens the highlighted camera (or backs out of one).
+                    if state.cameraSpotlight == nil { state.cameraSpotlightFocus(state.cameraGridSelection) }
+                    else { state.cameraSpotlightExit() }
+                } else {
+                    state.isFullscreen = false
                 }
-                .ignoresSafeArea()
             }
-
-            if bannerVisible, let channel = state.tunedChannel {
-                banner(for: channel)
-                    .padding(48)
-                    .transition(.opacity)
-            }
-
-            if showQuickPanel, let channel = state.tunedChannel {
-                quickPanel(for: channel)
-            }
-        }
-        .focusable(true)
-        .focused($focused)
-        // Select press returns to the guide (Menu via onExitCommand does too);
-        // press-and-hold select opens quick options instead.
-        .onTapGesture {
-            guard !showQuickPanel else { return }
-            if state.isCamerasTuned {
-                // Select opens the highlighted camera (or backs out of one).
-                if state.cameraSpotlight == nil { state.cameraSpotlightFocus(state.cameraGridSelection) }
-                else { state.cameraSpotlightExit() }
-            } else {
-                state.isFullscreen = false
-            }
-        }
-        .onLongPressGesture(minimumDuration: 0.6) {
-            guard !showQuickPanel else { return }
-            showQuickPanel = true
-            panelFocused = true
-        }
-        .onPlayPauseCommand { state.togglePause() }
-        .onMoveCommand { direction in
-            // On the cameras channel, left/right walks the spotlight through
-            // the bank; up/down still zaps channels.
-            if state.isCamerasTuned {
-                switch direction {
-                case .up: state.channelUp(); showBanner()
-                case .down: state.channelDown(); showBanner()
-                // In the grid, ◀/▶ walk the highlight; once a camera is open
-                // they switch which camera is spotlighted.
-                case .left:
-                    if state.cameraSpotlight == nil { state.cameraGridSelectionMove(-1) }
-                    else { state.cameraSpotlightMove(-1) }
-                case .right:
-                    if state.cameraSpotlight == nil { state.cameraGridSelectionMove(1) }
-                    else { state.cameraSpotlightMove(1) }
-                @unknown default: break
-                }
-                return
-            }
-            switch direction {
-            case .up:
-                state.channelUp()
-                showBanner()
-            case .down:
-                state.channelDown()
-                showBanner()
-            case .left, .right:
-                // Quick options for the tuned channel (up/down keep zapping).
+            .onLongPressGesture(minimumDuration: 0.6) {
+                guard !showQuickPanel else { return }
                 showQuickPanel = true
                 panelFocused = true
-            @unknown default:
-                break
             }
-        }
-        .onExitCommand {
-            if showQuickPanel {
-                closeQuickPanel()
-            } else if state.isCamerasTuned, state.cameraSpotlight != nil {
-                // Menu backs out of the spotlight to the camera grid first.
-                state.cameraSpotlightExit()
-            } else {
-                state.isFullscreen = false
+            .onMoveCommand { direction in
+                // Only fires while the panel is closed — once it opens this
+                // layer isn't focusable, so the panel's own focus engine takes
+                // over navigation.
+                // On the cameras channel, left/right walks the spotlight
+                // through the bank; up/down still zaps channels.
+                if state.isCamerasTuned {
+                    switch direction {
+                    case .up: state.channelUp(); showBanner()
+                    case .down: state.channelDown(); showBanner()
+                    // In the grid, ◀/▶ walk the highlight; once a camera is open
+                    // they switch which camera is spotlighted.
+                    case .left:
+                        if state.cameraSpotlight == nil { state.cameraGridSelectionMove(-1) }
+                        else { state.cameraSpotlightMove(-1) }
+                    case .right:
+                        if state.cameraSpotlight == nil { state.cameraGridSelectionMove(1) }
+                        else { state.cameraSpotlightMove(1) }
+                    @unknown default: break
+                    }
+                    return
+                }
+                switch direction {
+                case .up:
+                    state.channelUp()
+                    showBanner()
+                case .down:
+                    state.channelDown()
+                    showBanner()
+                case .left, .right:
+                    // Quick options for the tuned channel (up/down keep zapping).
+                    showQuickPanel = true
+                    panelFocused = true
+                @unknown default:
+                    break
+                }
+            }
+            // These fire while the panel is CLOSED (this layer holds focus).
+            // When the panel is open, focus is inside it and its own
+            // .onExitCommand (below) handles Menu.
+            .onPlayPauseCommand { state.togglePause() }
+            .onExitCommand {
+                if state.isCamerasTuned, state.cameraSpotlight != nil {
+                    // Menu backs out of the spotlight to the camera grid first.
+                    state.cameraSpotlightExit()
+                } else {
+                    state.isFullscreen = false
+                }
+            }
+
+            // Quick options — a SIBLING of the player layer so its toggles sit
+            // outside the .onMoveCommand above and navigate with the focus
+            // engine. It carries its own .onExitCommand so Menu closes it: the
+            // outer container isn't focusable, so an exit handler there wouldn't
+            // fire while focus is on a toggle in here.
+            if showQuickPanel, let channel = state.tunedChannel {
+                quickPanel(for: channel)
+                    .onExitCommand { closeQuickPanel() }
             }
         }
         .onAppear {

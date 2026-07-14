@@ -16,9 +16,9 @@
 - Full-screen viewing with channel up/down zapping and a retro channel banner
 - Guide paging in 30-minute steps, ~12 hours of schedule ahead
 - Built-in **weather channel** (channel 999) with a retro "Local on the 8s" style display
-- Optional **Home Assistant dashboard channels** (998, extras from 996 down) via the bundled [ha-screencap](ha-screencap) Home Assistant add-on / Docker container
+- Optional **Home Assistant dashboard channels** (996 and down) via the bundled [ha-screencap](ha-screencap) Home Assistant add-on / Docker container
 - Optional **photos channel** (channel 997): a slideshow of your [Immich](https://immich.app) favorites with crossfades, a slow Ken Burns drift, side-by-side portrait pairs, and an "on this day"-flavored rotation
-- Optional **security cameras channel** (channel 951): every Home Assistant camera live at once in a retro CCTV wall — full-motion HLS straight from HA, no transcoding
+- Optional **security cameras channel** (channel 997): every camera live at once in a retro CCTV wall — full-motion HLS straight from Home Assistant, or from a direct stream URL (go2rtc / MediaMTX / Frigate) to keep the load off HA
 - All of the above work **with or without Tunarr** — leave the server URL blank and the app runs on just the built-in channels
 - **Cast** — from the iPhone/iPad fullscreen controls, send a live channel to a **Chromecast / Google TV** (a small, self-contained CASTV2 implementation — no Google Cast SDK, no added dependencies) or **AirPlay** it to an Apple TV / AirPlay 2 receiver (Apple's own route picker)
 - **Universal** — one app for Apple TV, iPhone, and iPad; iPad gets a two-pane layout (video preview + program info up top, full guide below), close to the Apple TV experience
@@ -94,7 +94,7 @@ Without any of this configured, the weather channel shows a "set location in set
 
 ## The Home Assistant dashboard channel
 
-Channel **998 HOME** — and as many more as you like, extras numbered down from 996 — shows your Home Assistant dashboards as TV channels. tvOS has no web engine, so the app can't load a dashboard itself — instead, **ha-screencap** runs headless Chromium on your network, screenshots the dashboards every few seconds, and the app displays the latest frames.
+Channel **996 HOME** — and as many more as you like, numbered down from 996 — shows your Home Assistant dashboards as TV channels. tvOS has no web engine, so the app can't load a dashboard itself — instead, **ha-screencap** runs headless Chromium on your network, screenshots the dashboards every few seconds, and the app displays the latest frames.
 
 Two ways to run ha-screencap:
 
@@ -107,9 +107,13 @@ Tip: if the dashboard you capture has camera cards, set them to `camera_view: au
 
 ## The security cameras channel
 
-Channel **951 SECURITY** shows every configured Home Assistant camera at once — a retro CCTV monitor wall with camera labels, a blinking REC dot, and burned-in timestamps. Enter your camera entity ids in Settings (comma-separated, e.g. `camera.front_door, camera.backyard`); per-camera SHOW toggles control what's on the wall, live.
+Channel **997 SECURITY** shows every configured camera at once — a retro CCTV monitor wall with camera labels, a blinking REC dot, and burned-in timestamps. Each entry in Settings (comma-separated) is either a **Home Assistant entity id** or a **direct stream URL**; per-camera SHOW toggles control what's on the wall, live.
 
-Streams are full-motion HLS fetched per camera over HA's websocket API (`camera/stream`) — HA proxies each camera's own stream, so there's no transcoding and no meaningful server load. For fast channel joins, enable **stream preload** on the cameras (each camera's settings in HA, or the `preload_stream` camera preference) so HA keeps the streams warm; without it every tile waits out HA's cold stream spin-up. The TEST button in Settings verifies each entity and exercises the real stream path.
+**Home Assistant cameras** (`camera.front_door, camera.backyard`) stream as full-motion HLS fetched per camera over HA's websocket API (`camera/stream`). HA copies each camera's own stream rather than re-encoding it, but it still runs one HLS-packaging worker per camera — so a wall of ~10 cameras all live at once is real, sustained CPU on the HA host, enough to make a small HA VM sluggish while the grid is open. For fast channel joins, enable **stream preload** on the cameras (each camera's settings in HA, or the `preload_stream` camera preference) so HA keeps the streams warm; without it every tile waits out HA's cold stream spin-up.
+
+**Direct stream URLs** take that load off Home Assistant entirely. Write an entry as `Name=https://host/stream.m3u8` (a bare URL works too — the name is derived from its path) and the tile plays it straight, no HA round-trip. Point it at your own [go2rtc](https://github.com/AlexxIT/go2rtc), [MediaMTX](https://github.com/bluenviron/mediamtx), or [Frigate](https://frigate.video) remux — run it on any box you like (a NAS, a mini PC, wherever), feed it each camera's low/medium **RTSP substream**, and the grid never touches HA's transcoder. Note: playback is AVPlayer, so the URL must be **HLS** — raw `rtsp://` isn't supported; remux to HLS on that box. Entity and direct cameras mix freely in one list, so you can offload just the heavy feeds and leave the rest on HA.
+
+The TEST button in Settings verifies each entry — entity cameras exercise the real HA stream path; direct URLs are checked with a playlist request.
 
 ## The photos channel
 

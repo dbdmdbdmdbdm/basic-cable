@@ -68,11 +68,10 @@ enum HACameraStream {
     }
 }
 
-/// "camera.front_door" → "FRONT DOOR"
+/// "camera.front_door" → "FRONT DOOR"; a direct "Name=url" entry → its label.
 enum CameraName {
-    static func display(_ entityId: String) -> String {
-        let raw = entityId.split(separator: ".").last.map(String.init) ?? entityId
-        return raw.replacingOccurrences(of: "_", with: " ").uppercased()
+    static func display(_ token: String) -> String {
+        CameraSource(token: token).displayName
     }
 }
 
@@ -87,13 +86,15 @@ struct CamerasSceneView: View {
 
     var body: some View {
         let cameras = state.activeCameraIds
+        // Only entity cameras need HA; a direct-URL wall works without it.
+        let needsHA = cameras.contains { CameraSource(token: $0).needsHomeAssistant }
         GeometryReader { geo in
             ZStack {
                 Color.black
-                if !state.isDemoMode, state.haClient == nil {
+                if !state.isDemoMode, state.cameraEntityIds.isEmpty {
+                    message("ADD CAMERAS IN SETTINGS")
+                } else if !state.isDemoMode, state.haClient == nil, needsHA {
                     message("SET THE HOME ASSISTANT URL AND TOKEN IN SETTINGS")
-                } else if !state.isDemoMode, state.cameraEntityIds.isEmpty {
-                    message("ADD CAMERA ENTITIES IN SETTINGS")
                 } else if cameras.isEmpty {
                     message("ALL CAMERAS HIDDEN — TOGGLE THEM ON IN SETTINGS")
                 } else if !compact, cameras.count >= 2, let focus = state.cameraSpotlight {
@@ -265,9 +266,11 @@ struct CamerasSceneView: View {
     }
 }
 
-/// One monitor in the bank: fetches its HLS URL over the HA websocket,
-/// plays muted, and re-requests a fresh stream if playback dies or stalls
-/// (HA reaps idle HLS sessions; a stale token means a dead item).
+/// One monitor in the bank. An entity camera fetches its HLS URL over the HA
+/// websocket (`camera/stream`); a direct camera plays its user-supplied HLS
+/// URL as-is, never touching Home Assistant. Either way it plays muted and
+/// re-requests a fresh stream if playback dies or stalls (HA reaps idle HLS
+/// sessions; a stale token means a dead item).
 private struct CameraTileView: View {
     @EnvironmentObject var state: AppState
     let entityId: String
@@ -333,20 +336,18 @@ private struct CameraTileView: View {
         .padding(compact ? 5 : 12)
     }
 
+    private struct NotConfigured: Error {}
+
     private func run() async {
         // Tear down when the camera list changes out from under us.
         defer {
             player?.pause()
             player?.replaceCurrentItem(with: nil)
         }
+        let source = CameraSource(token: entityId)
         while !Task.isCancelled {
-            guard let ha = state.haClient else {
-                status = "NOT CONFIGURED"
-                return
-            }
             do {
-                let url = try await HACameraStream.fetchStreamURL(
-                    haURLString: ha.baseURL.absoluteString, token: ha.token, entityId: entityId)
+                let url = try await streamURL(for: source)
                 guard !Task.isCancelled else { return }
                 let item = AVPlayerItem(url: url)
                 // Join fast: don't wait for a deep buffer before first frame
@@ -358,6 +359,9 @@ private struct CameraTileView: View {
                 player.playImmediately(atRate: 1.0)
                 self.player = player
                 await monitor(item, on: player)
+            } catch is NotConfigured {
+                status = "NOT CONFIGURED"
+                return
             } catch {
                 player?.replaceCurrentItem(with: nil)
                 player = nil
@@ -365,6 +369,20 @@ private struct CameraTileView: View {
             }
             // Back off briefly, then request a fresh stream session.
             try? await Task.sleep(nanoseconds: 5_000_000_000)
+        }
+    }
+
+    /// Resolves the tile's playable HLS URL. A direct source plays as-is with
+    /// no Home Assistant round-trip; an entity is fetched over the HA
+    /// websocket `camera/stream` API (and needs HA configured).
+    private func streamURL(for source: CameraSource) async throws -> URL {
+        switch source {
+        case .direct(_, let url):
+            return url
+        case .entity(let id):
+            guard let ha = state.haClient else { throw NotConfigured() }
+            return try await HACameraStream.fetchStreamURL(
+                haURLString: ha.baseURL.absoluteString, token: ha.token, entityId: id)
         }
     }
 

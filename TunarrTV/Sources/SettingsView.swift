@@ -214,14 +214,15 @@ struct SettingsView: View {
             if let remote = state.remoteConfig?.cameras, !remote.isEmpty {
                 managedField("HA CAMERA ENTITIES", values: remote)
             } else {
-                field("HA CAMERA ENTITIES (COMMA-SEPARATED)",
-                      placeholder: "camera.front_door, camera.backyard", text: $haCamerasText)
+                field("CAMERAS — ENTITIES OR STREAM URLS (COMMA-SEPARATED)",
+                      placeholder: "camera.front_door, Backyard=http://go2rtc.home:1984/api/stream.m3u8?src=backyard",
+                      text: $haCamerasText)
                 suggestionControl("cameras", suggestions: cameraSuggestions, listText: $haCamerasText,
                                   buttonTitle: "SUGGEST CAMERAS") {
                     await state.suggestCameras(urlString: haURLText, token: haTokenText)
                 } assign: { cameraSuggestions = $0 }
             }
-            caption("Shows all cameras live in one grid as channel \(CamerasChannel.number) (list order = grid order). Uses the Home Assistant URL and token above — streams come straight from HA, full motion.")
+            caption("Shows all cameras live in one grid as channel \(CamerasChannel.number) (list order = grid order). Entity ids (camera.front_door) stream through the Home Assistant URL and token above. To take the load off Home Assistant, point a camera straight at a direct stream instead — Name=https://host/stream.m3u8 from your own go2rtc / MediaMTX / Frigate. HLS only (RTSP isn't supported); mix entities and URLs freely.")
             testControl("cameras") {
                 await state.testCameras(urlString: haURLText, token: haTokenText,
                                         cameraEntities: haCamerasText)

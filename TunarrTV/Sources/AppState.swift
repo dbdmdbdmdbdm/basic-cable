@@ -354,6 +354,15 @@ final class AppState: ObservableObject {
     }
 
     var effectiveCameraIds: [String] { Self.override(remoteConfig?.cameras, cameraEntityIds) }
+
+    /// At least one configured camera can actually play: entity cameras need
+    /// the HA client, direct HLS cameras always can. Gates the 997 channel so
+    /// a direct-only wall shows up even without Home Assistant configured.
+    var hasUsableCameras: Bool {
+        effectiveCameraIds.contains { token in
+            CameraSource(token: token).needsHomeAssistant ? haClient != nil : true
+        }
+    }
     var effectiveWeatherSensorIds: [String] {
         Self.override(remoteConfig?.weather_sensors, Self.parseEntityList(haSensorEntities))
     }
@@ -413,8 +422,8 @@ final class AppState: ObservableObject {
     /// Dashboard channels. Normally parsed from the settings field
     /// (comma-separated snapshot URLs, optionally "NAME=URL"); when the
     /// add-on's app config lists dashboards, those win — each resolves to
-    /// /latest/<index>.png on the add-on's origin. First keeps channel
-    /// 998; extras count down from 996 (997 is photos). Capped at 8.
+    /// /latest/<index>.png on the add-on's origin. Dashboards count down
+    /// from 996 (997 cameras, 998 photos, 999 weather sit above). Capped at 8.
     var dashboards: [DashboardConfig] {
         if let remote = remoteConfig?.dashboards, !remote.isEmpty, let origin = remoteConfigOrigin {
             return remote.prefix(8).map { dashboard in
@@ -455,7 +464,7 @@ final class AppState: ObservableObject {
     }
 
     static func dashboardChannelNumber(index: Int) -> Int {
-        index == 0 ? HADashboardChannel.number : 996 - (index - 1)
+        HADashboardChannel.number - index
     }
 
     /// The snapshot URL for the tuned dashboard channel, if one is tuned.
@@ -1243,13 +1252,13 @@ final class AppState: ObservableObject {
             lineup.sort { $0.0.number < $1.0.number }
             return lineup
         }
-        if haClient != nil, !effectiveCameraIds.isEmpty {
+        if hasUsableCameras {
             let channel = Channel(id: Self.camerasChannelId, name: "Security",
                                   number: CamerasChannel.number, icon: nil, groupTitle: nil)
             lineup.append((channel, [Self.allDayEntry(
                 id: "cams-full", channelId: channel.id, from: from, to: to,
                 kind: .cameras, title: "SECURITY CAMERAS",
-                summary: "A live multi-camera wall, streamed straight from your Home Assistant cameras."
+                summary: "A live multi-camera wall, streamed from your Home Assistant cameras or direct HLS URLs."
             )]))
         }
         if immichClient != nil {
@@ -1282,7 +1291,7 @@ final class AppState: ObservableObject {
             kind: .weather, title: "LOCAL FORECAST",
             summary: "Current conditions, extended forecast, and around-the-house readings."
         )]))
-        // Extra dashboards count down from 996, so sort to keep the guide
+        // Dashboards count down from 996, so sort to keep the guide
         // in channel-number order.
         lineup.sort { $0.0.number < $1.0.number }
         return lineup
@@ -1700,42 +1709,74 @@ final class AppState: ObservableObject {
     /// then a websocket camera/stream request and a GET of the returned
     /// HLS playlist. Preview is a still frame from the first camera.
     func testCameras(urlString: String, token: String, cameraEntities: String) async -> IntegrationTestResult {
-        guard let ha = HAClient(urlString: urlString, token: token) else {
-            return .init(message: "FAILED — SET THE HOME ASSISTANT URL AND TOKEN ABOVE")
+        let sources = Self.parseEntityList(cameraEntities).map { CameraSource(token: $0) }
+        guard !sources.isEmpty else {
+            return .init(message: "FAILED — ADD CAMERAS FIRST")
         }
-        let ids = Self.parseEntityList(cameraEntities)
-        guard !ids.isEmpty else {
-            return .init(message: "FAILED — ADD CAMERA ENTITIES FIRST")
-        }
-        var found: [String] = []
-        var missing: [String] = []
-        for id in ids {
-            if await ha.entityExists(id) { found.append(id) } else { missing.append(id) }
-        }
-        guard let first = found.first else {
-            return .init(message: "FAILED — NO CAMERAS FOUND, CHECK THE ENTITY IDS")
-        }
-
-        var streamOK = false
-        if let url = try? await HACameraStream.fetchStreamURL(
-            haURLString: urlString, token: token, entityId: first) {
-            var request = URLRequest(url: url)
-            request.timeoutInterval = 10
-            if let (_, response) = try? await URLSession.shared.data(for: request),
-               (response as? HTTPURLResponse)?.statusCode == 200 {
-                streamOK = true
+        var entityIds: [String] = []
+        var directURLs: [URL] = []
+        for source in sources {
+            switch source {
+            case .entity(let id): entityIds.append(id)
+            case .direct(_, let url): directURLs.append(url)
             }
         }
-        guard streamOK else {
-            return .init(message: "FAILED — CAMERA FOUND BUT ITS STREAM DIDN'T START")
+
+        var parts: [String] = []
+        var preview: UIImage?
+        var anyOK = false
+
+        // Entity cameras stream through Home Assistant — exercise the exact
+        // playback path: entity lookup, camera/stream request, playlist GET.
+        if !entityIds.isEmpty {
+            guard let ha = HAClient(urlString: urlString, token: token) else {
+                return .init(message: "FAILED — SET THE HOME ASSISTANT URL AND TOKEN ABOVE")
+            }
+            var found: [String] = []
+            var missing: [String] = []
+            for id in entityIds {
+                if await ha.entityExists(id) { found.append(id) } else { missing.append(id) }
+            }
+            if let first = found.first {
+                var streamOK = false
+                if let url = try? await HACameraStream.fetchStreamURL(
+                    haURLString: urlString, token: token, entityId: first) {
+                    var request = URLRequest(url: url)
+                    request.timeoutInterval = 10
+                    if let (_, response) = try? await URLSession.shared.data(for: request),
+                       (response as? HTTPURLResponse)?.statusCode == 200 {
+                        streamOK = true
+                    }
+                }
+                anyOK = anyOK || streamOK
+                parts.append(streamOK
+                    ? "\(found.count)/\(entityIds.count) HA CAMERAS · STREAM READY"
+                    : "HA CAMERA FOUND BUT ITS STREAM DIDN'T START")
+                preview = await ha.fetchCameraStill(first)
+                if let firstMissing = missing.first { parts.append("NOT FOUND: \(firstMissing)") }
+            } else {
+                parts.append("NO HA CAMERAS FOUND, CHECK THE ENTITY IDS")
+            }
         }
 
-        let preview = await ha.fetchCameraStill(first)
-        var message = "OK — \(found.count)/\(ids.count) CAMERAS · STREAM READY"
-        if let firstMissing = missing.first {
-            message += " · NOT FOUND: \(firstMissing)"
+        // Direct HLS URLs bypass Home Assistant — a 200 on the playlist is a
+        // green light without needing the HA URL or token at all.
+        if !directURLs.isEmpty {
+            var okCount = 0
+            for url in directURLs {
+                var request = URLRequest(url: url)
+                request.timeoutInterval = 10
+                if let (_, response) = try? await URLSession.shared.data(for: request),
+                   (response as? HTTPURLResponse)?.statusCode == 200 {
+                    okCount += 1
+                }
+            }
+            anyOK = anyOK || okCount > 0
+            parts.append("\(okCount)/\(directURLs.count) DIRECT STREAMS OK")
         }
-        return .init(message: message, preview: preview)
+
+        let prefix = anyOK ? "OK" : "FAILED"
+        return .init(message: prefix + " — " + parts.joined(separator: " · "), preview: preview)
     }
 
     /// Tests every configured dashboard URL; the preview is the first
