@@ -59,6 +59,29 @@ struct GuideView: View {
                 break
             }
         }
+        // The tvOS focus engine stops dead at the first/last channel.
+        // onMoveCommand only fires at those edges (mid-list moves are consumed
+        // by focus navigation), so wrap: up from the top row jumps to the last
+        // channel, down from the bottom row jumps to the first. tvOS-only API —
+        // guarded so the iOS/iPad target (which has no focus engine) compiles.
+        #if os(tvOS)
+        .onMoveCommand { direction in
+            let chans = state.channels
+            guard chans.count > 1 else { return }
+            switch direction {
+            case .up:
+                if isFirstChannelFocused(chans) {
+                    focus = .channelLabel(chans[chans.count - 1].id)
+                }
+            case .down:
+                if isLastChannelFocused(chans) {
+                    focus = .channelLabel(chans[0].id)
+                }
+            default:
+                break
+            }
+        }
+        #endif
     }
 
     // MARK: - Header
@@ -212,6 +235,27 @@ struct GuideView: View {
                 .offset(x: labelWidth + pagerWidth + spacing * 2 + CGFloat(minutes) * ppm)
                 .allowsHitTesting(false)
         }
+    }
+
+    /// The channel that currently holds focus, whatever column (label, a
+    /// program cell, or a pager button) is focused within its row.
+    private func focusedChannelId() -> String? {
+        switch focus {
+        case .channelLabel(let id): return id
+        case .cell(let entryId): return entry(withId: entryId)?.channelId
+        case .pagerLeft(let id), .pagerRight(let id): return id
+        case .none: return nil
+        }
+    }
+
+    private func isFirstChannelFocused(_ channels: [Channel]) -> Bool {
+        guard let id = focusedChannelId() else { return false }
+        return channels.first?.id == id
+    }
+
+    private func isLastChannelFocused(_ channels: [Channel]) -> Bool {
+        guard let id = focusedChannelId() else { return false }
+        return channels.last?.id == id
     }
 
     private func entry(withId id: String) -> GuideEntry? {

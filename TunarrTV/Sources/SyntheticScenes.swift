@@ -25,13 +25,20 @@ struct SyntheticChannelView: View {
 struct WeatherOverlayBadge: View {
     @EnvironmentObject var state: AppState
     var compact = false
+    /// Drop the condition text (icon + temp only) where width is tight — the
+    /// photos channel shares the bottom row with a date stamp on a phone.
+    var tempOnly = false
 
     var body: some View {
         if let current = state.weatherData.current {
             HStack(spacing: compact ? 5 : 10) {
                 Image(systemName: WMO.symbol(current.code))
                     .symbolRenderingMode(.multicolor)
-                Text("\(Int(current.temperature.rounded()))° \(WMO.description(current.code))")
+                Text(tempOnly
+                     ? "\(Int(current.temperature.rounded()))°"
+                     : "\(Int(current.temperature.rounded()))° \(WMO.description(current.code))")
+                    .lineLimit(1)
+                    .fixedSize()
             }
             .font(Theme.mono(compact ? 11 : 22, weight: .medium))
             .foregroundColor(.white.opacity(0.92))
@@ -170,26 +177,11 @@ struct PhotoSceneView: View {
                 if !panes.isEmpty {
                     HStack(spacing: panes.count > 1 ? 4 : 0) {
                         ForEach(Array(panes.enumerated()), id: \.offset) { index, pane in
-                            ZStack(alignment: .bottomLeading) {
-                                KenBurnsImage(image: pane.image,
-                                              zoomIn: (slideIndex + index).isMultiple(of: 2))
-                                    .frame(width: (geo.size.width - CGFloat(panes.count > 1 ? 4 : 0)) / CGFloat(panes.count),
-                                           height: geo.size.height)
-                                    .clipped()
-                                if let date = pane.date, !compact {
-                                    Text(date)
-                                        .font(Theme.mono(20, weight: .medium))
-                                        .foregroundColor(.white.opacity(0.85))
-                                        .padding(.horizontal, 14)
-                                        .padding(.vertical, 8)
-                                        .background(Color.black.opacity(0.45))
-                                        .cornerRadius(6)
-                                        .padding(28)
-                                        // Sit above the ticker bar instead
-                                        // of under it.
-                                        .padding(.bottom, state.tickerEnabled ? 56 : 0)
-                                }
-                            }
+                            KenBurnsImage(image: pane.image,
+                                          zoomIn: (slideIndex + index).isMultiple(of: 2))
+                                .frame(width: (geo.size.width - CGFloat(panes.count > 1 ? 4 : 0)) / CGFloat(panes.count),
+                                       height: geo.size.height)
+                                .clipped()
                         }
                     }
                     .id(slideIndex)
@@ -206,14 +198,36 @@ struct PhotoSceneView: View {
                             .padding(.horizontal, 40)
                     }
                 }
-                // The badge stands down when the ticker is on — it already
-                // shows the weather along the bottom.
-                if state.weatherOverlayOnPhotos, !panes.isEmpty, !state.tickerEnabled {
-                    VStack {
-                        Spacer()
-                        HStack {
+                // Photo date (left) and the weather badge (right) share one
+                // bottom row. Keeping them in a single HStack means the layout
+                // engine never lets them overlap — the weather text is wide
+                // enough to reach the date's corner on a narrow phone otherwise.
+                // The weather badge stands down when the ticker is on (it already
+                // shows the weather along the bottom).
+                if !panes.isEmpty {
+                    let showWeather = state.weatherOverlayOnPhotos && !state.tickerEnabled
+                    if (panes.first?.date != nil && !compact) || showWeather {
+                        VStack {
                             Spacer()
-                            WeatherOverlayBadge(compact: compact)
+                            HStack(alignment: .bottom) {
+                                if let date = panes.first?.date, !compact {
+                                    Text(date)
+                                        .font(Theme.mono(20, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.85))
+                                        .lineLimit(1)
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 8)
+                                        .background(Color.black.opacity(0.45))
+                                        .cornerRadius(6)
+                                        .padding(.leading, 28)
+                                        .padding(.bottom, 28)
+                                }
+                                Spacer(minLength: 12)
+                                if showWeather {
+                                    WeatherOverlayBadge(compact: compact, tempOnly: true)
+                                }
+                            }
+                            .padding(.bottom, state.tickerEnabled ? 44 : 0)
                         }
                     }
                 }
