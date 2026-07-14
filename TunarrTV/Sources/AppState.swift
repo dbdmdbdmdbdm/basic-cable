@@ -67,15 +67,6 @@ final class AppState: ObservableObject {
     @Published var tickerEnabled: Bool {
         didSet { persist(tickerEnabled ? "true" : "false", forKey: "tickerEnabled") }
     }
-    /// Closed captions / subtitles, global across channels. Only does anything
-    /// when the live stream actually carries a caption track (Tunarr must pass
-    /// one through); applied to every new player item.
-    @Published var subtitlesEnabled: Bool {
-        didSet {
-            persist(subtitlesEnabled ? "true" : "false", forKey: "subtitlesEnabled")
-            applySubtitles(to: player.currentItem)
-        }
-    }
     /// Album feeding the photos channel; empty = favorites (the default).
     @Published var immichAlbumId: String {
         didSet { persist(immichAlbumId, forKey: "immichAlbumId") }
@@ -212,7 +203,6 @@ final class AppState: ObservableObject {
     private var prefetchTask: Task<Void, Never>?
     private var lastPrefetchedChannelId: String?
     private var itemFailureWatch: AnyCancellable?
-    private var subtitleWatch: AnyCancellable?
     #if os(tvOS)
     private var idleTimerWatch: AnyCancellable?
     #endif
@@ -513,7 +503,6 @@ final class AppState: ObservableObject {
         // enabled means the global ticker starts on.
         tickerEnabled = setting("tickerEnabled") == "true"
             || !setting("tickerChannels").isEmpty
-        subtitlesEnabled = setting("subtitlesEnabled") == "true"
         weatherOverlayOnPhotos = setting("weatherOverlayPhotos") == "true"
         weatherOverlayOnCameras = setting("weatherOverlayCameras") == "true"
         haReportNowPlaying = setting("haReportNowPlaying") == "true"
@@ -541,14 +530,6 @@ final class AppState: ObservableObject {
             .receive(on: DispatchQueue.main)
             .map { $0 == .waitingToPlayAtSpecifiedRate }
             .assign(to: &$isBuffering)
-
-        // Re-apply the caption preference to every new stream item (each tune
-        // makes a fresh AVPlayerItem).
-        subtitleWatch = player.publisher(for: \.currentItem)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] item in
-                if let item { self?.applySubtitles(to: item) }
-            }
 
         #if os(tvOS)
         // Keep the tvOS screensaver from cutting in while a channel is on.
@@ -617,28 +598,6 @@ final class AppState: ObservableObject {
     }
     #endif
 
-    /// Select or clear the stream's subtitle/caption track to match
-    /// `subtitlesEnabled`. A no-op when the stream carries no legible track,
-    /// so it's safe to leave on for channels without captions.
-    func applySubtitles(to item: AVPlayerItem?) {
-        guard let item else { return }
-        let enabled = subtitlesEnabled
-        Task {
-            guard let group = try? await item.asset.loadMediaSelectionGroup(for: .legible) else { return }
-            let option: AVMediaSelectionOption?
-            if enabled {
-                // Prefer a track in the device's language, else the first
-                // non-forced caption track, else whatever's there.
-                option = AVMediaSelectionGroup.mediaSelectionOptions(from: group.options, with: Locale.current).first
-                    ?? group.options.first { !$0.hasMediaCharacteristic(.containsOnlyForcedSubtitles) }
-                    ?? group.options.first
-            } else {
-                option = nil
-            }
-            await MainActor.run { item.select(option, in: group) }
-        }
-    }
-
     #if os(tvOS)
     /// Disable the system idle timer (and thus the screensaver) while a channel
     /// is tuned and playing — live video/audio (anything but a paused player) or
@@ -675,7 +634,6 @@ final class AppState: ObservableObject {
         persist(immichAlbumName, forKey: "immichAlbumName")
         persist(mediaPlayerEntities, forKey: "mediaPlayerEntities")
         persist(tickerEnabled ? "true" : "false", forKey: "tickerEnabled")
-        persist(subtitlesEnabled ? "true" : "false", forKey: "subtitlesEnabled")
         persist(weatherOverlayOnPhotos ? "true" : "false", forKey: "weatherOverlayPhotos")
         persist(weatherOverlayOnCameras ? "true" : "false", forKey: "weatherOverlayCameras")
         persist(haReportNowPlaying ? "true" : "false", forKey: "haReportNowPlaying")
@@ -691,7 +649,7 @@ final class AppState: ObservableObject {
         "haSensorEntities", "haWeatherEntity", "haCameraEntities",
         "hiddenCameras", "dashImageURL", "immichURL", "immichKey",
         "immichAlbumId", "immichAlbumName", "mediaPlayerEntities",
-        "tickerEnabled", "subtitlesEnabled", "weatherOverlayPhotos", "weatherOverlayCameras",
+        "tickerEnabled", "weatherOverlayPhotos", "weatherOverlayCameras",
         "haReportNowPlaying",
     ]
 
@@ -715,7 +673,6 @@ final class AppState: ObservableObject {
         case "immichAlbumName": immichAlbumName = value
         case "mediaPlayerEntities": mediaPlayerEntities = value
         case "tickerEnabled": tickerEnabled = value == "true"
-        case "subtitlesEnabled": subtitlesEnabled = value == "true"
         case "weatherOverlayPhotos": weatherOverlayOnPhotos = value == "true"
         case "weatherOverlayCameras": weatherOverlayOnCameras = value == "true"
         case "haReportNowPlaying": haReportNowPlaying = value == "true"
@@ -981,8 +938,6 @@ final class AppState: ObservableObject {
                 mediaPlayerEntities = value
             case "tickerEnabled":
                 tickerEnabled = value == "true"
-            case "subtitlesEnabled":
-                subtitlesEnabled = value == "true"
             case "immichAlbumId" where value != immichAlbumId:
                 immichAlbumId = value
             case "immichAlbumName" where value != immichAlbumName:

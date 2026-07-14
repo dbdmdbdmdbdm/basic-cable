@@ -237,23 +237,6 @@ struct FullscreenPlayerIOS: View {
                         .background(Color.black.opacity(0.6))
                         .clipShape(Circle())
                 }
-                // Subtitles / CC — only for live streams (synthetic channels
-                // have no caption track).
-                if !state.isSyntheticTuned {
-                    Button {
-                        state.subtitlesEnabled.toggle()
-                        scheduleHide()
-                    } label: {
-                        Image(systemName: state.subtitlesEnabled ? "captions.bubble.fill" : "captions.bubble")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(state.subtitlesEnabled ? Theme.onAir : .white)
-                            .frame(width: 48, height: 48)
-                            .background(Color.black.opacity(0.6))
-                            .clipShape(Circle())
-                            .contentShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-                }
                 Button {
                     state.tickerEnabled.toggle()
                     if state.tickerEnabled {
