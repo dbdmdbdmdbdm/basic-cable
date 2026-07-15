@@ -121,7 +121,12 @@ async function newPage(browser) {
         expires: 9999999999999,
         refresh_token: '',
       });
-      await page.goto(HA_URL + DASH_PATHS[0], { waitUntil: 'networkidle2', timeout: 60000 });
+      // domcontentloaded, not networkidle2: dashboards with live camera
+      // cards stream continuously and never reach network idle, so the old
+      // networkidle2 wait would hit the 60s timeout. waitForReady() is what
+      // actually gates the screenshot on rendered content.
+      await page.goto(HA_URL + DASH_PATHS[0], { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await waitForReady(page);
       return page;
     } catch (e) {
       console.error(`page setup failed (attempt ${attempt}): ${e.message}`);
@@ -263,7 +268,7 @@ async function captureWith(browser) {
         // Cycle dashboards on one page (a page per dashboard costs
         // hundreds of MB of Chromium each). Each navigation is a fresh
         // render, so the periodic reload only matters single-path.
-        await page.goto(HA_URL + DASH_PATHS[current], { waitUntil: 'networkidle2', timeout: 60000 });
+        await page.goto(HA_URL + DASH_PATHS[current], { waitUntil: 'domcontentloaded', timeout: 60000 });
       }
       await waitForReady(page); // don't capture a mid-load spinner
       await hideChrome(page);
@@ -273,7 +278,8 @@ async function captureWith(browser) {
       if (DASH_PATHS.length === 1) {
         shotsSinceReload++;
         if (shotsSinceReload >= shotsPerReload) {
-          await page.reload({ waitUntil: 'networkidle2', timeout: 60000 });
+          await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+          await waitForReady(page);
           shotsSinceReload = 0;
         }
       }
