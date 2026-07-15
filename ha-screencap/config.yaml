@@ -1,5 +1,5 @@
 name: Basic Cable Screencap
-version: "1.5.3"
+version: "1.5.4"
 slug: ha_screencap
 description: Serves PNG snapshots of your dashboards for the Basic Cable app's Home Dashboard channels
 url: https://github.com/dbdmdbdmdbdm/basic-cable

@@ -202,43 +202,64 @@ async function hideChrome(page) {
   });
 }
 
-// Wait until the lovelace view has actually rendered cards and no loading
-// spinner is left visible, so a slow dashboard (camera grids, history) is
-// never screenshotted mid-load as a lone spinner. Bounded — a genuinely
-// stuck dashboard still yields *a* frame after maxMs rather than hanging.
-async function waitForReady(page, maxMs = 12000) {
+// Wait until the dashboard is actually rendered — not just present in the
+// DOM as skeleton cards — so we never screenshot a mid-hydration frame
+// (blank, "Loading…", raw unformatted values, a lone spinner). We require:
+//   * the HA websocket connected and entity states populated (hass ready),
+//   * the lovelace view has children,
+//   * no loading spinner anywhere in the lovelace subtree, and
+//   * the rendered content has stopped changing between two polls (custom
+//     cards like button-card paint a tick after states arrive).
+// Bounded by maxMs so a genuinely stuck dashboard still yields *a* frame
+// (cold Chromium after a restart can take a while to warm, hence 30s).
+async function waitForReady(page, maxMs = 30000) {
   const deadline = Date.now() + maxMs;
+  let lastSig = null;
+  let stableHits = 0;
   for (;;) {
-    let ready = false;
+    let s = null;
     try {
-      ready = await page.evaluate(() => {
+      s = await page.evaluate(() => {
         try {
-          const hasSpinner = (root, depth) => {
-            if (depth > 8 || !root || !root.querySelector) return false;
-            if (root.querySelector('ha-circular-progress, ha-spinner, paper-spinner, .spinner')) return true;
-            for (const el of root.querySelectorAll('*')) {
-              if (el.shadowRoot && hasSpinner(el.shadowRoot, depth + 1)) return true;
-            }
-            return false;
-          };
-          const main = document
-            .querySelector('home-assistant')
-            .shadowRoot.querySelector('home-assistant-main');
+          const ha = document.querySelector('home-assistant');
+          const hass = ha && ha.hass;
+          if (!hass || !hass.connected) return { ok: false };
+          const nStates = hass.states ? Object.keys(hass.states).length : 0;
+          if (nStates < 5) return { ok: false };
+          const main = ha.shadowRoot.querySelector('home-assistant-main');
           const panel = main.shadowRoot
             .querySelector('partial-panel-resolver')
             .querySelector('ha-panel-lovelace');
           const root = panel.shadowRoot.querySelector('hui-root');
           const view = root.shadowRoot.querySelector('#view');
-          if (!view || view.children.length === 0) return false;
-          return !hasSpinner(panel.shadowRoot, 0);
+          if (!view || view.children.length === 0) return { ok: false };
+          const hasSpinner = (r, d) => {
+            if (d > 10 || !r || !r.querySelector) return false;
+            if (r.querySelector('ha-circular-progress, ha-spinner, paper-spinner, mwc-circular-progress, .spinner')) return true;
+            for (const el of r.querySelectorAll('*')) {
+              if (el.shadowRoot && hasSpinner(el.shadowRoot, d + 1)) return true;
+            }
+            return false;
+          };
+          if (hasSpinner(panel.shadowRoot, 0)) return { ok: false };
+          // Signature to detect a settled render (content stopped changing).
+          return { ok: true, sig: view.innerHTML.length + ':' + nStates };
         } catch (e) {
-          return false; // structure not built yet — keep waiting
+          return { ok: false }; // structure not built yet — keep waiting
         }
       });
     } catch (e) {
       // evaluate can throw mid-navigation; treat as not-ready and retry.
     }
-    if (ready || Date.now() >= deadline) return;
+    if (s && s.ok) {
+      stableHits = s.sig === lastSig ? stableHits + 1 : 0;
+      lastSig = s.sig;
+      if (stableHits >= 1) return; // ready + unchanged for one extra poll
+    } else {
+      stableHits = 0;
+      lastSig = null;
+    }
+    if (Date.now() >= deadline) return;
     await sleep(500);
   }
 }
