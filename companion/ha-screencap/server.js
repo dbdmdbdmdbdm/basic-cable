@@ -158,6 +158,24 @@ async function hideChrome(page) {
         .shadowRoot.querySelector('home-assistant-main');
       main.style.setProperty('--mdc-drawer-width', '0px');
       const drawer = main.shadowRoot.querySelector('ha-drawer');
+      // Modern HA (2024+) renders the drawer as `.sidebar-shell` (a fixed
+      // 256px column) beside `.app-content`, whose `padding-left:256px` is
+      // what leaves the empty band once the sidebar is hidden. Older builds
+      // used mwc-drawer (`.mdc-drawer` + `.mdc-drawer-app-content` margin).
+      // Zero both, inside the drawer's shadow root, so the dashboard fills
+      // the frame regardless of frontend version.
+      if (drawer && drawer.shadowRoot &&
+          !drawer.shadowRoot.querySelector('#screencap-drawer-style')) {
+        const ds = document.createElement('style');
+        ds.id = 'screencap-drawer-style';
+        ds.textContent =
+          '.sidebar-shell{display:none!important}' +
+          '.app-content{padding-left:0!important;padding-inline-start:0!important}' +
+          '.mdc-drawer{display:none!important}' +
+          '.mdc-drawer-app-content{margin-left:0!important;margin-inline-start:0!important}';
+        drawer.shadowRoot.appendChild(ds);
+      }
+      // Legacy fallback: some builds slot ha-sidebar directly in ha-drawer.
       const sidebar = drawer && drawer.querySelector('ha-sidebar');
       if (sidebar) sidebar.style.display = 'none';
       const panel = main.shadowRoot
@@ -177,6 +195,47 @@ async function hideChrome(page) {
       /* frontend structure changed — capture with chrome visible */
     }
   });
+}
+
+// Wait until the lovelace view has actually rendered cards and no loading
+// spinner is left visible, so a slow dashboard (camera grids, history) is
+// never screenshotted mid-load as a lone spinner. Bounded — a genuinely
+// stuck dashboard still yields *a* frame after maxMs rather than hanging.
+async function waitForReady(page, maxMs = 12000) {
+  const deadline = Date.now() + maxMs;
+  for (;;) {
+    let ready = false;
+    try {
+      ready = await page.evaluate(() => {
+        try {
+          const hasSpinner = (root, depth) => {
+            if (depth > 8 || !root || !root.querySelector) return false;
+            if (root.querySelector('ha-circular-progress, ha-spinner, paper-spinner, .spinner')) return true;
+            for (const el of root.querySelectorAll('*')) {
+              if (el.shadowRoot && hasSpinner(el.shadowRoot, depth + 1)) return true;
+            }
+            return false;
+          };
+          const main = document
+            .querySelector('home-assistant')
+            .shadowRoot.querySelector('home-assistant-main');
+          const panel = main.shadowRoot
+            .querySelector('partial-panel-resolver')
+            .querySelector('ha-panel-lovelace');
+          const root = panel.shadowRoot.querySelector('hui-root');
+          const view = root.shadowRoot.querySelector('#view');
+          if (!view || view.children.length === 0) return false;
+          return !hasSpinner(panel.shadowRoot, 0);
+        } catch (e) {
+          return false; // structure not built yet — keep waiting
+        }
+      });
+    } catch (e) {
+      // evaluate can throw mid-navigation; treat as not-ready and retry.
+    }
+    if (ready || Date.now() >= deadline) return;
+    await sleep(500);
+  }
 }
 
 async function captureLoop() {
@@ -205,8 +264,8 @@ async function captureWith(browser) {
         // hundreds of MB of Chromium each). Each navigation is a fresh
         // render, so the periodic reload only matters single-path.
         await page.goto(HA_URL + DASH_PATHS[current], { waitUntil: 'networkidle2', timeout: 60000 });
-        await sleep(1500); // let cards settle after the route change
       }
+      await waitForReady(page); // don't capture a mid-load spinner
       await hideChrome(page);
       latests[current] = await page.screenshot({ type: 'png' });
       latestAts[current] = Date.now();
