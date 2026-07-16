@@ -21,7 +21,17 @@ const DASH_PATHS = (process.env.DASH_PATHS || process.env.DASH_PATH || '/lovelac
 const INTERVAL = Math.max(3, +(process.env.INTERVAL_SECONDS || 10));
 const WIDTH = +(process.env.WIDTH || 1920);
 const HEIGHT = +(process.env.HEIGHT || 1080);
+// Two listeners on two internal ports:
+//   PORT (8080)        — the ingress-facing port. HA's authenticated ingress
+//                        proxies to it; it is NOT published to the LAN, so it
+//                        is the only place the admin config UI is reachable.
+//   PUBLIC_PORT (8099) — published to the LAN (host :8090). Serves ONLY the
+//                        public app routes (snapshots, /appconfig, /appbackup,
+//                        /healthz); every admin route 403s here.
+// Gating admin on *which socket the request arrived on* can't be spoofed with
+// a forged X-Ingress-Path header the way a single shared listener could be.
 const PORT = +(process.env.PORT || 8080);
+const PUBLIC_PORT = +(process.env.PUBLIC_PORT || 8099);
 const RELOAD_EVERY = Math.max(1, +(process.env.RELOAD_MINUTES || 60));
 const DARK = (process.env.DARK_MODE || 'true') === 'true';
 
@@ -430,11 +440,15 @@ const CONFIG_PAGE = `<!doctype html>
 <script>
 const FIELDS = __FIELDS__;
 let entities = [], sel = {}, canSave = false;
+// Entity friendly-names come from HA and are rendered via innerHTML below;
+// escape them so a crafted name can't inject markup into this admin page.
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 function chipRow(key, id, multi, index, count) {
   const e = entities.find((x) => x.id === id);
   const chip = document.createElement('div'); chip.className = 'chip';
-  chip.innerHTML = '<span>' + (e ? e.name : id) + ' <small>' + id + '</small></span>';
+  chip.innerHTML = '<span>' + esc(e ? e.name : id) + ' <small>' + esc(id) + '</small></span>';
   if (multi && count > 1) {
     for (const [glyph, delta] of [['\\u2039', -1], ['\\u203a', 1]]) {
       const move = document.createElement('button'); move.textContent = glyph;
@@ -473,7 +487,7 @@ function attachSearch(f) {
     menu.innerHTML = '';
     for (const e of hits) {
       const row = document.createElement('div');
-      row.innerHTML = e.name + ' <span class="eid">' + e.id + '</span>';
+      row.innerHTML = esc(e.name) + ' <span class="eid">' + esc(e.id) + '</span>';
       row.onpointerdown = () => {
         if (f.multi) sel[f.key].push(e.id); else sel[f.key] = [e.id];
         input.value = ''; menu.style.display = 'none'; render();
@@ -566,8 +580,15 @@ function ingressOnly(req) {
   return !!req.headers['x-ingress-path'];
 }
 
-http
-  .createServer((req, res) => {
+// allowAdmin is true only for the ingress listener (PORT). The published LAN
+// listener (PUBLIC_PORT) passes false, so admin routes 403 there regardless of
+// any headers a LAN client sets.
+function handleRequest(req, res, allowAdmin) {
+    const adminOK = allowAdmin && ingressOnly(req);
+    const denyAdmin = () => {
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      res.end('admin UI is only available through the Home Assistant sidebar');
+    };
     // Reject DNS-rebinding attempts before doing anything else.
     if (!hostAllowed(req)) {
       res.writeHead(403, { 'Content-Type': 'text/plain' });
@@ -585,21 +606,13 @@ http
       return;
     }
     if (req.url === '/config' || req.url.startsWith('/config?')) {
-      if (!ingressOnly(req)) {
-        res.writeHead(403, { 'Content-Type': 'text/plain' });
-        res.end('admin UI is only available through the Home Assistant sidebar');
-        return;
-      }
+      if (!adminOK) { denyAdmin(); return; }
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(CONFIG_PAGE);
       return;
     }
     if (req.url.startsWith('/config/entities')) {
-      if (!ingressOnly(req)) {
-        res.writeHead(403, { 'Content-Type': 'text/plain' });
-        res.end('admin UI is only available through the Home Assistant sidebar');
-        return;
-      }
+      if (!adminOK) { denyAdmin(); return; }
       fetchEntities()
         .then((list) => {
           res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
@@ -612,11 +625,7 @@ http
       return;
     }
     if (req.url.startsWith('/config/current')) {
-      if (!ingressOnly(req)) {
-        res.writeHead(403, { 'Content-Type': 'text/plain' });
-        res.end('admin UI is only available through the Home Assistant sidebar');
-        return;
-      }
+      if (!adminOK) { denyAdmin(); return; }
       let opts = {};
       try { opts = readOptions(); } catch (_) { /* no options file */ }
       res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
@@ -646,7 +655,20 @@ http
         });
         req.on('end', () => {
           try {
-            JSON.parse(body);
+            const parsed = JSON.parse(body);
+            // This endpoint is unauthenticated on the LAN and the blob is
+            // served back on GET, so never let a plaintext credential be
+            // stored here: the app must encrypt haToken/immichKey (enc:v1:
+            // envelope) before backing up. Reject anything that isn't, so a
+            // plaintext token can never sit in /data or be read off the LAN.
+            const s = (parsed && parsed.settings) || {};
+            for (const k of ['haToken', 'immichKey']) {
+              if (s[k] && !String(s[k]).startsWith('enc:v1:')) {
+                res.writeHead(400, { 'Content-Type': 'text/plain' });
+                res.end(`refusing to store an unencrypted ${k}`);
+                return;
+              }
+            }
             fs.writeFileSync(backupPath, body);
             console.log(`app settings backup stored (${body.length} bytes)`);
             res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -669,11 +691,7 @@ http
       return;
     }
     if (req.url.startsWith('/config/save') && req.method === 'POST') {
-      if (!ingressOnly(req)) {
-        res.writeHead(403, { 'Content-Type': 'text/plain' });
-        res.end('admin UI is only available through the Home Assistant sidebar');
-        return;
-      }
+      if (!adminOK) { denyAdmin(); return; }
       if (!SUPERVISOR_TOKEN) {
         res.writeHead(403, { 'Content-Type': 'text/plain' });
         res.end('not running as a Home Assistant add-on');
@@ -713,7 +731,7 @@ http
     // what the sidebar entry opens, with HA's own auth in front. Direct
     // hits on the mapped port keep serving the first snapshot so
     // existing app/tile configs don't break.
-    if ((req.url === '/' || req.url.startsWith('/?')) && req.headers['x-ingress-path']) {
+    if ((req.url === '/' || req.url.startsWith('/?')) && adminOK) {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(CONFIG_PAGE);
       return;
@@ -740,9 +758,22 @@ http
     }
     res.writeHead(404);
     res.end();
-  })
+}
+
+// Ingress-facing listener (admin + public routes). Not published to the LAN.
+http
+  .createServer((req, res) => handleRequest(req, res, true))
   .on('error', (e) => { console.error('server error', e); process.exit(1); })
-  .listen(PORT, () => console.log(`serving on :${PORT}`));
+  .listen(PORT, () => console.log(`serving on :${PORT} (ingress/admin)`));
+
+// Published LAN listener (public routes only — admin routes 403 here). Skip it
+// only if it would collide with the ingress port.
+if (PUBLIC_PORT && PUBLIC_PORT !== PORT) {
+  http
+    .createServer((req, res) => handleRequest(req, res, false))
+    .on('error', (e) => { console.error('public server error', e); process.exit(1); })
+    .listen(PUBLIC_PORT, () => console.log(`serving on :${PUBLIC_PORT} (public)`));
+}
 
 // Never die: the HTTP server keeps serving (healthz goes 503, stale
 // frames stay available) while the capture loop rebuilds itself.

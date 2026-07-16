@@ -1,5 +1,5 @@
 name: Basic Cable Screencap
-version: "1.5.4"
+version: "1.5.5"
 slug: ha_screencap
 description: Serves PNG snapshots of your dashboards for the Basic Cable app's Home Dashboard channels
 url: https://github.com/dbdmdbdmdbdm/basic-cable
@@ -14,11 +14,15 @@ arch:
 init: false
 startup: services
 boot: auto
+# Publish the public listener (8099), NOT the ingress port (8080). The admin
+# config UI lives only on 8080, which HA's authenticated ingress reaches but
+# the LAN cannot — so a LAN client on 8090 gets snapshots but never the admin
+# routes, no matter what headers it sends.
 ports:
-  8080/tcp: 8090
+  8099/tcp: 8090
 ports_description:
-  8080/tcp: Snapshot server (/latest.png, /latest/<n>.png, /healthz)
-watchdog: "http://[HOST]:[PORT:8080]/healthz"
+  8099/tcp: Snapshot server (/latest.png, /latest/<n>.png, /healthz)
+watchdog: "http://[HOST]:[PORT:8099]/healthz"
 options:
   token: ""
   dash_paths: /lovelace/0

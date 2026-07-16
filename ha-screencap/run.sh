@@ -10,7 +10,8 @@ export WIDTH="$(bashio::config 'width')"
 export HEIGHT="$(bashio::config 'height')"
 export DARK_MODE="$(bashio::config 'dark_mode')"
 export RELOAD_MINUTES="$(bashio::config 'reload_minutes')"
-export PORT=8080
+export PORT=8080          # ingress-facing (admin UI); not published to the LAN
+export PUBLIC_PORT=8099    # published to the LAN via ports: (snapshots only)
 
 if bashio::config.is_empty 'token'; then
     bashio::log.fatal "Set a long-lived access token in the add-on configuration."

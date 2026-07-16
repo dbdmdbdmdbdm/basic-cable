@@ -50,12 +50,21 @@ already configured) and these lists **override** whatever is typed in
 the app's settings, so everything is managed here in HA.
 
 **Prefer the Web UI for the entity lists**: the add-on's **Open Web UI**
-button (or `http://<ha-host>:8090/config`) is a real entity picker —
+button (the "Basic Cable" entry in the HA sidebar) is a real entity picker —
 searchable dropdowns for cameras (with grid-order reordering), weather
 sensors, the weather forecast entity, and media players. It exists
 because HA's add-on options page can only render these as text; saving
 from it updates the options below and restarts the add-on. Dashboards,
 capture settings, and ticker chips stay on the classic options page.
+
+The picker is reachable **only through the Home Assistant sidebar** (which
+authenticates you). The snapshot port `8090` on your LAN serves just the
+screenshots, `/appconfig`, and `/healthz` — `…:8090/config` returns 403.
+
+> **Trust model:** the snapshot port (`8090`) has no authentication of its
+> own — anyone on your LAN can view the dashboard screenshots and read the
+> entity lists it serves, because the Apple TV app has no way to log in.
+> Keep it on a trusted network; the token itself is never exposed on it.
 
 The same options in YAML form:
 

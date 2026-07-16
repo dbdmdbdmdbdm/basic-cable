@@ -868,16 +868,36 @@ final class AppState: ObservableObject {
               let settings = payload["settings"] as? [String: String] else {
             return "RESTORE FAILED — BACKUP UNREADABLE"
         }
-        for key in Self.settingsKeys {
-            var value = settings[key] ?? ""
-            if Self.secretSettingKeys.contains(key), value.hasPrefix(Self.backupEncPrefix) {
-                // Encrypted credential: decrypt with this device's key. If it
-                // can't be opened (no key synced here), leave the existing
-                // value in place rather than wiping a working token.
-                guard let plaintext = decryptSecret(value) else { continue }
-                value = plaintext
+        // Capture each credential's *current* server URL before applying the
+        // restore, so we can tell whether the backup is repointing us at a
+        // new server. A backup can arrive from the add-on's unauthenticated
+        // LAN endpoint, so a hostile one could pair a new haURL with a token
+        // it can't have encrypted for us; we must never keep the existing
+        // (real) token and send it to that new host.
+        let credentialPairs: [(secret: String, url: String, oldURL: String)] = [
+            ("haToken", "haURL", haURLString),
+            ("immichKey", "immichURL", immichURLString),
+        ]
+        // Apply all non-secret settings first (this updates the URL fields).
+        for key in Self.settingsKeys where !Self.secretSettingKeys.contains(key) {
+            applySetting(key, settings[key] ?? "")
+        }
+        // Then resolve credentials.
+        for pair in credentialPairs {
+            let raw = settings[pair.secret] ?? ""
+            if raw.isEmpty {
+                applySetting(pair.secret, "")
+            } else if let plaintext = decryptSecret(raw) {
+                // Decryptable (or a legacy plaintext backup) — apply it.
+                applySetting(pair.secret, plaintext)
+            } else {
+                // Can't be opened on this device (no key synced here). Keep the
+                // existing on-device token only if the server URL is unchanged;
+                // if the backup moves us to a different server, clear it so the
+                // old token is never sent to a new host — force re-entry.
+                let newURL = settings[pair.url] ?? ""
+                if newURL != pair.oldURL { applySetting(pair.secret, "") }
             }
-            applySetting(key, value)
         }
         Task {
             await reload()

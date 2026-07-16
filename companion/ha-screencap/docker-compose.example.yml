@@ -2,8 +2,10 @@ services:
   ha-screencap:
     build: .
     container_name: ha-screencap
+    # Map the public listener (8099): snapshots, /appconfig, /healthz. The
+    # admin config UI on 8080 is intentionally not published.
     ports:
-      - "8090:8080"
+      - "8090:8099"
     environment:
       - HA_URL=http://homeassistant.local:8123
       # A Home Assistant long-lived access token (create one on your HA
