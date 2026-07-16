@@ -274,6 +274,31 @@ async function waitForReady(page, maxMs = 30000) {
   }
 }
 
+// Cross-origin iframes (e.g. an iframe card embedding another LAN app)
+// paint after the dashboard itself reports ready, and their internals are
+// unreadable from out here — so when the page contains one, give it a
+// fixed settle before the screenshot instead of racing its first paint.
+const IFRAME_SETTLE_MS = 2500;
+async function settleIframes(page) {
+  let found = false;
+  try {
+    found = await page.evaluate(() => {
+      const seek = (r, d) => {
+        if (d > 12 || !r || !r.querySelector) return false;
+        if (r.querySelector('iframe')) return true;
+        for (const el of r.querySelectorAll('*')) {
+          if (el.shadowRoot && seek(el.shadowRoot, d + 1)) return true;
+        }
+        return false;
+      };
+      return seek(document, 0);
+    });
+  } catch (_) {
+    /* evaluate can throw mid-navigation — treat as no iframe */
+  }
+  if (found) await sleep(IFRAME_SETTLE_MS);
+}
+
 async function captureLoop() {
   const browser = await puppeteer.launch({
     executablePath: process.env.CHROME_PATH || '/usr/bin/chromium',
@@ -302,6 +327,7 @@ async function captureWith(browser) {
         await page.goto(HA_URL + DASH_PATHS[current], { waitUntil: 'domcontentloaded', timeout: 60000 });
       }
       await waitForReady(page); // don't capture a mid-load spinner
+      await settleIframes(page); // embedded pages paint after ready
       await hideChrome(page);
       latests[current] = await page.screenshot({ type: 'png' });
       latestAts[current] = Date.now();
