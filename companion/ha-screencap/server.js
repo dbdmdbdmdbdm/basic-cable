@@ -327,8 +327,11 @@ async function captureWith(browser) {
         await page.goto(HA_URL + DASH_PATHS[current], { waitUntil: 'domcontentloaded', timeout: 60000 });
       }
       await waitForReady(page); // don't capture a mid-load spinner
-      await settleIframes(page); // embedded pages paint after ready
+      // Chrome-hiding reflows the layout, so it must land BEFORE the iframe
+      // settle: embedded pages paint after ready AND need to re-layout at
+      // the post-sidebar width, or the shot keeps a sidebar-wide dead band.
       await hideChrome(page);
+      await settleIframes(page);
       latests[current] = await page.screenshot({ type: 'png' });
       latestAts[current] = Date.now();
       consecutiveFailures = 0;
