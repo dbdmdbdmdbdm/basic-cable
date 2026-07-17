@@ -274,6 +274,37 @@ async function waitForReady(page, maxMs = 30000) {
   }
 }
 
+// Hiding the chrome collapses the sidebar via CSS, but HA's JS-driven
+// layouts (masonry columns, iframe/aspect-ratio cards) only recompute on a
+// window resize event — nothing fires one, so whether the shot keeps a
+// sidebar-wide dead band depends on a layout race. Dispatch the resize
+// ourselves and hold the screenshot until the view actually spans the
+// viewport (or the deadline passes — non-lovelace panels just fall through).
+async function waitForFullWidth(page, maxMs = 4000) {
+  const deadline = Date.now() + maxMs;
+  for (;;) {
+    let ok = true;
+    try {
+      ok = await page.evaluate(() => {
+        window.dispatchEvent(new Event('resize'));
+        const root = document
+          .querySelector('home-assistant')
+          .shadowRoot.querySelector('home-assistant-main')
+          .shadowRoot.querySelector('partial-panel-resolver')
+          .querySelector('ha-panel-lovelace')
+          .shadowRoot.querySelector('hui-root');
+        const view = root.shadowRoot.querySelector('hui-view-container')
+          || root.shadowRoot.querySelector('#view');
+        return view.getBoundingClientRect().width >= window.innerWidth - 8;
+      });
+    } catch (_) {
+      /* structure change or non-lovelace panel — don't block the capture */
+    }
+    if (ok || Date.now() >= deadline) return;
+    await sleep(100);
+  }
+}
+
 // Cross-origin iframes (e.g. an iframe card embedding another LAN app)
 // paint after the dashboard itself reports ready, and their internals are
 // unreadable from out here — so when the page contains one, give it a
@@ -331,6 +362,7 @@ async function captureWith(browser) {
       // settle: embedded pages paint after ready AND need to re-layout at
       // the post-sidebar width, or the shot keeps a sidebar-wide dead band.
       await hideChrome(page);
+      await waitForFullWidth(page);
       await settleIframes(page);
       latests[current] = await page.screenshot({ type: 'png' });
       latestAts[current] = Date.now();
