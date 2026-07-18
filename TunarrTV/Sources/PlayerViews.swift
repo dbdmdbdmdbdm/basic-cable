@@ -129,6 +129,14 @@ struct FullscreenPlayerView: View {
                 case .down:
                     state.channelDown()
                     showBanner()
+                case .left where state.tunedMixInfo != nil:
+                    // Mix channels: ◀/▶ hop between the family's variants
+                    // (quick options stay on hold-select).
+                    state.cycleVariant(-1)
+                    showBanner()
+                case .right where state.tunedMixInfo != nil:
+                    state.cycleVariant(1)
+                    showBanner()
                 case .left, .right:
                     // Quick options for the tuned channel (up/down keep zapping).
                     showQuickPanel = true
@@ -222,18 +230,26 @@ struct FullscreenPlayerView: View {
     }
 
     private func banner(for channel: Channel) -> some View {
-        HStack(spacing: 16) {
-            Text("\(channel.number)")
+        // A mix member wears its family's identity — same number and name
+        // as the guide entry, plus which mix is on.
+        let mix = state.tunedMixInfo
+        return HStack(spacing: 16) {
+            Text("\(mix?.baseNumber ?? channel.number)")
                 .font(Theme.mono(40))
                 .foregroundColor(Theme.onAir)
             VStack(alignment: .leading, spacing: 4) {
-                Text(channel.name.uppercased())
+                Text((mix?.baseName ?? channel.name).uppercased())
                     .font(Theme.mono(28))
                     .foregroundColor(.white)
                 if let entry = state.nowPlaying(on: channel) {
                     Text(entry.title.uppercased())
                         .font(Theme.mono(20, weight: .medium))
                         .foregroundColor(Theme.dimText)
+                }
+                if let mix {
+                    Text("MIX \(mix.index + 1)/\(mix.count) · LEFT/RIGHT TO SWITCH")
+                        .font(Theme.mono(15, weight: .medium))
+                        .foregroundColor(Theme.onAir)
                 }
             }
         }

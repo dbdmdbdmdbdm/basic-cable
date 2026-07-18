@@ -123,8 +123,16 @@ struct FullscreenPlayerIOS: View {
                         DragGesture(minimumDistance: 40)
                             .onEnded { value in
                                 let dy = value.translation.height
-                                guard abs(dy) > 60, abs(dy) > abs(value.translation.width) else { return }
-                                if dy < 0 { state.channelUp() } else { state.channelDown() }
+                                let dx = value.translation.width
+                                if abs(dy) > 60, abs(dy) > abs(dx) {
+                                    if dy < 0 { state.channelUp() } else { state.channelDown() }
+                                } else if abs(dx) > 60, state.tunedMixInfo != nil {
+                                    // Mix channels: horizontal swipe hops
+                                    // between the family's variants.
+                                    state.cycleVariant(dx < 0 ? 1 : -1)
+                                } else {
+                                    return
+                                }
                                 withAnimation { showControls = true }
                                 scheduleHide()
                             }
@@ -205,8 +213,10 @@ struct FullscreenPlayerIOS: View {
                     .buttonStyle(.plain)
                 }
                 if let channel = state.tunedChannel {
+                    let mix = state.tunedMixInfo
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("\(channel.number)  \(channel.name.uppercased())")
+                        Text("\(mix?.baseNumber ?? channel.number)  \((mix?.baseName ?? channel.name).uppercased())"
+                             + (mix.map { " · MIX \($0.index + 1)/\($0.count)" } ?? ""))
                             .font(Theme.mono(15))
                             .foregroundColor(.white)
                         if let entry = state.nowPlaying(on: channel) {
@@ -275,6 +285,14 @@ struct FullscreenPlayerIOS: View {
                 VStack(spacing: 14) {
                     zapButton("chevron.up") { state.channelUp(); scheduleHide() }
                     zapButton("chevron.down") { state.channelDown(); scheduleHide() }
+                    // Mix channels: hop to the next variant (or swipe
+                    // horizontally anywhere on the video).
+                    if state.tunedMixInfo != nil {
+                        zapButton("shuffle", tint: Theme.onAir) {
+                            state.cycleVariant(1)
+                            scheduleHide()
+                        }
+                    }
                 }
                 .padding(.trailing, 16)
             }
@@ -282,11 +300,12 @@ struct FullscreenPlayerIOS: View {
         }
     }
 
-    private func zapButton(_ symbol: String, action: @escaping () -> Void) -> some View {
+    private func zapButton(_ symbol: String, tint: Color = .white,
+                           action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 20, weight: .bold))
-                .foregroundColor(.white)
+                .foregroundColor(tint)
                 .frame(width: 48, height: 48)
                 .background(Color.black.opacity(0.6))
                 .clipShape(Circle())

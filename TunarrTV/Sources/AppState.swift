@@ -699,10 +699,19 @@ final class AppState: ObservableObject {
         } else if !haReportNowPlaying {
             stateValue = "Off"; attributes["view"] = "off"
         } else if let channel = tunedChannel {
-            stateValue = channel.name
-            attributes["channel"] = channel.number
+            // Variant members report under their family's identity.
+            if let mix = tunedMixInfo {
+                stateValue = mix.baseName
+                attributes["channel"] = mix.baseNumber
+                attributes["mix"] = "\(mix.index + 1)/\(mix.count)"
+            } else {
+                stateValue = channel.name
+                attributes["channel"] = channel.number
+            }
             attributes["view"] = isFullscreen ? "watching" : "guide"
-            if let program = nowPlaying(on: channel)?.title { attributes["program"] = program }
+            if let program = nowPlaying(on: channel)?.title {
+                attributes["program"] = program
+            }
         } else {
             stateValue = "Idle"; attributes["view"] = "idle"
         }
@@ -1064,7 +1073,11 @@ final class AppState: ObservableObject {
             guide[channel.id] = entries
         }
 
-        self.channels = channels
+        // Hidden variant members stay tunable (left/right mix hopping,
+        // last-channel resume) but only their family's primary shows in
+        // the guide and the zap order.
+        self.allChannels = channels
+        self.channels = Self.visibleChannels(channels)
         self.guide = guide
         self.guideFetchedThrough = to
         self.loadError = nil
@@ -1073,11 +1086,11 @@ final class AppState: ObservableObject {
         }
         if tunedChannel == nil {
             let lastId = UserDefaults.standard.string(forKey: "lastChannelId")
-            if let target = channels.first(where: { $0.id == lastId }) ?? channels.first {
+            if let target = allChannels.first(where: { $0.id == lastId }) ?? self.channels.first {
                 tune(target)
             }
         } else if let tuned = tunedChannel,
-                  let fresh = channels.first(where: { $0.id == tuned.id }),
+                  let fresh = allChannels.first(where: { $0.id == tuned.id }),
                   fresh != tuned {
             // Keep the retained tuned channel pointing at the freshly-decoded
             // instance so channel up/down (which locates it in `channels`)
@@ -1152,6 +1165,7 @@ final class AppState: ObservableObject {
         tunedChannel = nil
         focusedEntry = nil
         channels = []
+        allChannels = []
         guide = [:]
         guideFetchedThrough = .distantPast
         weatherData = WeatherData()
@@ -1342,6 +1356,70 @@ final class AppState: ObservableObject {
                                       locationName: locationName, fetchedAt: Date())
         } else {
             weatherData.houseSensors = sensors
+        }
+    }
+
+    // MARK: - Channel variants ("mixes")
+
+    /// Several Tunarr channels can share a groupTitle (anything other than
+    /// Tunarr's default "tunarr"): they collapse into ONE guide entry —
+    /// the lowest-numbered member — and while watching, left/right hops
+    /// between the members. Point them at the same library with different
+    /// shuffles and you get skippable "mixes" of one channel; point them
+    /// at different lineups and they're themed variants.
+    /// The extra members should be marked stealth in Tunarr so they stay
+    /// out of its M3U/XMLTV outputs too.
+
+    /// The full channel list including hidden variant members. `channels`
+    /// (what the guide and zapping use) carries only one entry per family.
+    private(set) var allChannels: [Channel] = []
+
+    /// The family key for a channel, or nil when it isn't part of one.
+    static func variantKey(_ channel: Channel) -> String? {
+        let group = (channel.groupTitle ?? "").trimmingCharacters(in: .whitespaces).lowercased()
+        guard !group.isEmpty, group != "tunarr" else { return nil }
+        return group
+    }
+
+    /// All members of the tuned channel's family (sorted by number), or
+    /// nil when the channel isn't in one / the family has a single member.
+    func variantFamily(of channel: Channel) -> [Channel]? {
+        guard let key = Self.variantKey(channel) else { return nil }
+        let members = allChannels
+            .filter { Self.variantKey($0) == key }
+            .sorted { $0.number < $1.number }
+        return members.count > 1 ? members : nil
+    }
+
+    /// Banner/info context for the tuned mix: which member is playing, how
+    /// many there are, and the family's display identity (the primary
+    /// member's name and number, so variants never leak their own).
+    var tunedMixInfo: (index: Int, count: Int, baseName: String, baseNumber: Int)? {
+        guard let channel = tunedChannel, let family = variantFamily(of: channel),
+              let index = family.firstIndex(where: { $0.id == channel.id }),
+              let primary = family.first else { return nil }
+        return (index, family.count, primary.name, primary.number)
+    }
+
+    /// Hop to the previous/next member of the tuned channel's family.
+    func cycleVariant(_ delta: Int) {
+        guard let channel = tunedChannel, let family = variantFamily(of: channel),
+              let index = family.firstIndex(where: { $0.id == channel.id }) else { return }
+        lastZapAt = Date()   // mashing left/right debounces like zapping
+        let next = family[((index + delta) % family.count + family.count) % family.count]
+        tune(next)
+    }
+
+    /// Collapses variant families to their primary member for the guide.
+    static func visibleChannels(_ channels: [Channel]) -> [Channel] {
+        var seenFamilies = Set<String>()
+        var counts: [String: Int] = [:]
+        for channel in channels {
+            if let key = variantKey(channel) { counts[key, default: 0] += 1 }
+        }
+        return channels.sorted { $0.number < $1.number }.filter { channel in
+            guard let key = variantKey(channel), counts[key, default: 0] > 1 else { return true }
+            return seenFamilies.insert(key).inserted
         }
     }
 
@@ -1551,8 +1629,12 @@ final class AppState: ObservableObject {
 
     private func step(by delta: Int) {
         guard !channels.isEmpty else { return }
-        guard let tuned = tunedChannel,
-              let index = channels.firstIndex(where: { $0.id == tuned.id }) else {
+        // A tuned hidden variant zaps as its family's guide entry.
+        let anchorId = tunedChannel.flatMap { tuned in
+            variantFamily(of: tuned)?.first?.id ?? tuned.id
+        }
+        guard let anchorId,
+              let index = channels.firstIndex(where: { $0.id == anchorId }) else {
             tune(channels[0])
             return
         }

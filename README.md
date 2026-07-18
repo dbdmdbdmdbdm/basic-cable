@@ -19,6 +19,7 @@
 - Optional **Home Assistant dashboard channels** (996 and down) via the bundled [ha-screencap](ha-screencap) Home Assistant add-on / Docker container
 - Optional **photos channel** (channel 997): a slideshow of your [Immich](https://immich.app) favorites with crossfades, a slow Ken Burns drift, side-by-side portrait pairs, and an "on this day"-flavored rotation
 - Optional **security cameras channel** (channel 997): every camera live at once in a retro CCTV wall — full-motion HLS straight from Home Assistant, or from a direct stream URL (go2rtc / MediaMTX / Frigate) to keep the load off HA
+- **Channel mixes**: several Tunarr channels sharing a groupTitle collapse into one guide entry — left/right hops between them while watching. Point them at the same library with different shuffles for skippable "mixes" of a music channel, or at different lineups for themed variants
 - All of the above work **with or without Tunarr** — leave the server URL blank and the app runs on just the built-in channels
 - **Cast** — from the iPhone/iPad fullscreen controls, send a live channel to a **Chromecast / Google TV** (a small, self-contained CASTV2 implementation — no Google Cast SDK, no added dependencies) or **AirPlay** it to an Apple TV / AirPlay 2 receiver (Apple's own route picker)
 - **Universal** — one app for Apple TV, iPhone, and iPad; iPad gets a two-pane layout (video preview + program info up top, full guide below), close to the Apple TV experience
@@ -119,6 +120,25 @@ The TEST button in Settings verifies each entry — entity cameras exercise the 
 
 Channel **997 PHOTOS** is a shuffled slideshow of your [Immich](https://immich.app) favorites — 12 seconds per photo with a crossfade, a slow Ken Burns drift, and a month/year stamp. Configure it in Settings with your Immich URL and an API key (Immich → Account Settings → API Keys; `asset.read`, `asset.view` and `album.read` permissions are enough). The channel only appears once both are set. Photos stream directly from your Immich server and are never stored.
 
+## Channel mixes
+
+Give two or more Tunarr channels the same **group title** (anything other
+than Tunarr's default `tunarr`) and Basic Cable collapses them into a single
+guide entry: only the lowest-numbered member shows in the guide, and while
+watching, **left/right** on the Apple TV remote (or a horizontal swipe /
+the shuffle button on iPhone and iPad) hops between the members. The banner
+shows which mix is on ("MIX 2/3"); quick options move to press-and-hold
+select on these channels.
+
+The classic use is a skippable music channel: clone the channel a few times,
+point every clone at the same library with a different shuffle, and
+"don't like this song" becomes a hop to a parallel broadcast — no per-viewer
+stream, no extra server cost beyond the one session you're watching. The
+same mechanism works for themed variants (different lineups under one guide
+entry). Mark the extra members **stealth** in Tunarr so they stay out of its
+M3U/XMLTV outputs (Plex DVR and the like); Basic Cable still sees them
+through the API.
+
 ## Remote controls
 
 **In the guide:**
@@ -132,6 +152,7 @@ Channel **997 PHOTOS** is a shuffled slideshow of your [Immich](https://immich.a
 
 - Swipe up/down — channel up/down (shows the channel banner)
 - Play/Pause — pause and resume
+- Left/Right (on a mix channel) — hop between the family's variant channels
 - Select or Menu — back to the guide
 
 ## Building and installing
