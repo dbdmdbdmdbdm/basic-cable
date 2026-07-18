@@ -127,6 +127,10 @@ struct GuideEntry: Identifiable, Hashable {
     let summary: String?
     let year: Int?
     let episodeLabel: String?
+    /// Music videos and live sets (Tunarr program type "other_video"):
+    /// the current track is the headline, so the ticker promotes it to a
+    /// first-class now-playing item instead of the plain fallback line.
+    var isMusic: Bool = false
 
     enum Kind: Hashable {
         case content
@@ -264,7 +268,8 @@ extension GuideEntry {
                 subtitle: subtitle,
                 summary: program?.summary,
                 year: program?.year ?? (seasonIsYear ? seasonIndex : nil),
-                episodeLabel: episodeLabel
+                episodeLabel: episodeLabel,
+                isMusic: program?.type == "other_video"
             )
         case "flex":
             self.init(

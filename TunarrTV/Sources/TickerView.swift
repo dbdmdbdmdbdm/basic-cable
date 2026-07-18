@@ -35,11 +35,33 @@ struct ChannelTickerView: View {
         .task { await poll() }
     }
 
+    /// What the tuned channel itself is airing, as a ticker item — only for
+    /// music content (music videos / live sets), where the current track is
+    /// the headline. Regular shows keep the plain fallback line below.
+    private var channelTrack: HAClient.NowPlayingItem? {
+        guard let channel = state.tunedChannel,
+              let entry = state.nowPlaying(on: channel),
+              entry.isMusic else { return nil }
+        return HAClient.NowPlayingItem(title: Self.cleanTitle(entry.title), artist: nil, players: ["On Air"])
+    }
+
+    /// Plex titles can arrive truncated mid-parenthetical ("… (Official") —
+    /// drop an unclosed trailing fragment so the crawl reads clean.
+    static func cleanTitle(_ raw: String) -> String {
+        guard let open = raw.lastIndex(of: "("), !raw[open...].contains(")") else { return raw }
+        return String(raw[..<open]).trimmingCharacters(in: .whitespaces)
+    }
+
     @ViewBuilder
     private var leftSide: some View {
+        // The channel's own track leads the rotation; speakers playing the
+        // same thing (e.g. the TV routed through the Sonos) don't repeat it.
+        let items = (channelTrack.map { track in
+            [track] + nowPlaying.filter { $0.title != track.title }
+        }) ?? nowPlaying
         HStack(spacing: compact ? 12 : 26) {
-            if !nowPlaying.isEmpty {
-                let item = nowPlaying[rotationIndex % nowPlaying.count]
+            if !items.isEmpty {
+                let item = items[rotationIndex % items.count]
                 HStack(spacing: compact ? 6 : 12) {
                     Image(systemName: "music.note")
                         .font(.system(size: textSize * 0.85, weight: .bold))
@@ -64,8 +86,8 @@ struct ChannelTickerView: View {
                             .foregroundColor(Theme.dimText)
                             .lineLimit(1)
                     }
-                    if nowPlaying.count > 1 {
-                        Text("\(rotationIndex % nowPlaying.count + 1)/\(nowPlaying.count)")
+                    if items.count > 1 {
+                        Text("\(rotationIndex % items.count + 1)/\(items.count)")
                             .font(Theme.mono(textSize * 0.75, weight: .medium))
                             .foregroundColor(Theme.dimText)
                     }
