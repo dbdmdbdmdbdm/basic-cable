@@ -27,7 +27,7 @@
 
 ## Requirements
 
-- **A running Tunarr server, optionally** (tested against Tunarr 1.3.x) reachable from your Apple TV over the network. Channels should use Tunarr's default **HLS** stream mode. No Tunarr? Use the "NO TUNARR? USE JUST THE BUILT-IN CHANNELS" path on first run — weather, dashboards, photos, and cameras all work standalone.
+- **A running Tunarr server, optionally** (tested against Tunarr 1.3.x) reachable from your Apple TV over the network. Channels should use Tunarr's default **HLS** stream mode — `hls_direct` emits playlists no remote client can play (see [docs/TUNARR.md](docs/TUNARR.md)). No Tunarr? Use the "NO TUNARR? USE JUST THE BUILT-IN CHANNELS" path on first run — weather, dashboards, photos, and cameras all work standalone.
 - **Apple TV** running tvOS 17 or later (or the tvOS Simulator), and/or an **iPhone/iPad** on iOS 17+ (target `TunarrTViOS` — a universal app: iPhone shows the stacked touch guide, iPad shows a two-pane layout closer to the Apple TV screen; tap a channel to tune, tap the tuned channel or the video preview for fullscreen, on-screen chevrons to zap, AirPlay button in the fullscreen controls).
 - To build: a Mac with **Xcode 15+** and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
 
@@ -70,11 +70,12 @@ Notes:
 
 ## Server sizing & troubleshooting
 
-Honest expectations for the box running Tunarr — most "the app is broken" reports are actually the server out of breath:
+Honest expectations for the box running Tunarr — most "the app is broken" reports are actually the server out of breath. (The long version — stream-mode traps, transcode-config gotchas, HDR strategy, lineup rot, and a failure-mode cookbook — lives in [docs/TUNARR.md](docs/TUNARR.md).)
 
 - **Hardware transcoding is effectively required.** Software ffmpeg on a NAS-class CPU runs slower than realtime on modern sources (constant buffering). Any Intel iGPU with QuickSync/VAAPI (an N100 mini PC is the sweet spot) transcodes at many times realtime.
 - **Each tuned channel is one live transcode.** A 4-core N100 handles a few concurrent channels comfortably; it does not handle six. Channel zapping spawns sessions faster than they're reaped — the app throttles this (rapid surfing spawns one session, not one per press), but the budget is still small.
-- **4K HDR content is the heavy path.** HDR→SDR tonemapping is the most expensive thing Tunarr does, and on VAAPI-only iGPUs the current release picks a broken pipeline for it ([tunarr#1951](https://github.com/chrisbenincasa/tunarr/issues/1951)). Prefer SDR copies of channel content where you can.
+- **4K HDR content is the heavy path.** HDR→SDR tonemapping is the most expensive thing Tunarr does, and on VAAPI-only iGPUs the current release picks a broken pipeline for it ([tunarr#1951](https://github.com/chrisbenincasa/tunarr/issues/1951)). Prefer SDR copies of channel content where you can — [docs/TUNARR.md](docs/TUNARR.md#hdr-pre-transcode-instead-of-live-tonemapping) describes the "channel masters" pre-transcode setup that makes this automatic.
+- **High-framerate sources need their own transcode config.** Tunarr has no output-framerate setting, so a channel of 1080p50/60 broadcasts (sports) demands a live 1080p50 encode — too much for a small iGPU. Give those channels a per-channel 720p transcode config; details in [docs/TUNARR.md](docs/TUNARR.md#transcode-configs-per-channel-and-only-fresh-sessions-see-changes).
 - **"Some channels work, some don't."** That's the server-overload signature, not randomness: already-running streams keep playing while every *new* transcode fails to start. Tunarr ≤1.3.8 makes this worse by leaking the failed sessions' ffmpeg processes, which snowballs ([tunarr#1950](https://github.com/chrisbenincasa/tunarr/issues/1950)). The app shows **SERVER BUSY** over the static when it detects this state (server API answering but the stream repeatedly failing to start) versus **NO SIGNAL** when the server is unreachable — press play/pause to retry. Server-side, the optional [tunarr-watchdog companion](companion/tunarr-watchdog) logs per-channel failures and reaps leaked ffmpeg processes automatically.
 
 ## The weather channel

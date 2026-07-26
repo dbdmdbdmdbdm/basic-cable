@@ -94,3 +94,13 @@ tunarr-channel-failures.log:
 
 The zombie signature, if you're checking by hand: `pgrep -cx ffmpeg` much
 larger than the channel count in `GET /api/sessions`.
+
+## Known blind spot
+
+One wedge this watchdog can't see: Tunarr's **served HLS playlist freezing**
+while ffmpeg keeps writing segments — the API answers, ffmpeg counts look
+normal, no zombie, but the client buffers a stale playlist window forever.
+The test is fetching the channel's `hls/stream.m3u8` over HTTP twice ~15 s
+apart: if it doesn't advance while the on-disk playlist (under `streams/`
+in Tunarr's config dir) does, restart the container. See
+[docs/TUNARR.md](../../docs/TUNARR.md#failure-modes-from-the-servers-side).
