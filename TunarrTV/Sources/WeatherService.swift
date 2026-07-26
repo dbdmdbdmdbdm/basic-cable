@@ -239,6 +239,17 @@ struct HAClient {
         return summary
     }
 
+    /// Raw state + attributes for one entity; nil when the entity is missing
+    /// or HA is unreachable. Attributes stay untyped — callers pick out the
+    /// keys they know (used by the quick panel's server-stats readout).
+    func fetchStateDetail(entityId: String) async -> (state: String, attributes: [String: Any])? {
+        guard let (data, response) = try? await URLSession.shared.data(for: request(path: "api/states/\(entityId)")),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let state = object["state"] as? String else { return nil }
+        return (state, object["attributes"] as? [String: Any] ?? [:])
+    }
+
     struct EntitySummary {
         let entityId: String
         let name: String?

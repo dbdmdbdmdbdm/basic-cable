@@ -65,6 +65,49 @@ struct TunarrClient {
         return try JSONDecoder().decode(VersionResponse.self, from: data).tunarr
     }
 
+    /// One live server session (≈ one ffmpeg transcode) for the stats panel.
+    struct SessionDetail: Identifiable {
+        let id: String
+        let channelId: String
+        let type: String
+        let numConnections: Int
+        /// Seconds since the freshest client heartbeat; nil = no clients attached.
+        let newestHeartbeatAge: Int?
+    }
+
+    /// Every session with its client count and heartbeat freshness —
+    /// backs the SERVER STATS readout in the quick panel.
+    func fetchSessionDetails() async throws -> [SessionDetail] {
+        var request = URLRequest(url: baseURL.appendingPathComponent("api/sessions"))
+        request.timeoutInterval = 5
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw URLError(.badServerResponse)
+        }
+        struct Connection: Decodable { let lastHeartbeat: Double? }
+        struct Session: Decodable {
+            let type: String?
+            let numConnections: Int?
+            let connections: [Connection]?
+        }
+        let sessions = try JSONDecoder().decode([String: [Session]].self, from: data)
+        let nowMs = Date().timeIntervalSince1970 * 1000
+        var details: [SessionDetail] = []
+        for (channelId, list) in sessions {
+            for (index, session) in list.enumerated() {
+                let newest = (session.connections ?? [])
+                    .compactMap { $0.lastHeartbeat }.max()
+                details.append(SessionDetail(
+                    id: "\(channelId)#\(index)",
+                    channelId: channelId,
+                    type: session.type ?? "?",
+                    numConnections: session.numConnections ?? 0,
+                    newestHeartbeatAge: newest.map { max(0, Int((nowMs - $0) / 1000)) }))
+            }
+        }
+        return details
+    }
+
     /// Total HLS sessions on the server and each channel's connection
     /// count — feeds the surf guard and abandoned-session cleanup.
     func sessionSnapshot() async throws -> (total: Int, connectionsByChannel: [String: Int]) {

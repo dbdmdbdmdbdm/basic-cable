@@ -36,6 +36,7 @@ struct FullscreenPlayerView: View {
     @State private var bannerVisible = true
     @State private var bannerTask: Task<Void, Never>?
     @State private var showQuickPanel = false
+    @State private var serverStats: ServerStats?
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -199,6 +200,8 @@ struct FullscreenPlayerView: View {
                         .font(Theme.mono(24, weight: .medium))
                 }
                 .focused($panelFocused)
+                Divider().background(Color(white: 0.25))
+                statsSection()
                 Text("HOLD SELECT ANYTIME FOR THIS PANEL · SET PLAYERS IN SETTINGS · MENU TO CLOSE")
                     .font(Theme.mono(15, weight: .medium))
                     .foregroundColor(Theme.dimText)
@@ -212,6 +215,144 @@ struct FullscreenPlayerView: View {
         }
         .frame(maxWidth: .infinity)
         .transition(.opacity)
+        .task { await statsLoop() }
+    }
+
+    // MARK: - Server stats
+
+    /// Snapshot for the panel's SERVER STATS readout: live sessions straight
+    /// from Tunarr, plus slower-moving health pushed into HA by the LXC-side
+    /// watchdog/push scripts (absent entities just hide their line).
+    struct ServerStats {
+        var tunarrReachable = false
+        var version: String?
+        var sessions: [TunarrClient.SessionDetail] = []
+        var ffmpegCount: Int?          // real process count (≤5 min stale, via HA)
+        var watchdogRestarts24h: Int?
+        var factoryState: String?      // idle | transcoding | capped
+        var currentMovie: String?
+        var libraryGB: Double?
+    }
+
+    /// Refreshes stats every few seconds while the panel is open; the .task
+    /// on the panel cancels this when it closes.
+    private func statsLoop() async {
+        while !Task.isCancelled {
+            await loadStats()
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+        }
+    }
+
+    private func loadStats() async {
+        guard !state.isDemoMode, let client = state.client else { return }
+        var stats = ServerStats()
+        do {
+            async let version = client.fetchVersion()
+            async let sessions = client.fetchSessionDetails()
+            stats.version = try await version
+            stats.sessions = try await sessions
+                .sorted { ($0.newestHeartbeatAge ?? .max) < ($1.newestHeartbeatAge ?? .max) }
+            stats.tunarrReachable = true
+        } catch {
+            stats.tunarrReachable = false
+        }
+        if let ha = state.haClient {
+            if let detail = await ha.fetchStateDetail(entityId: "sensor.tunarr_transcode_status") {
+                stats.factoryState = detail.state
+                stats.ffmpegCount = detail.attributes["ffmpeg_count"] as? Int
+                if detail.attributes["transcoding_now"] as? Bool == true {
+                    stats.currentMovie = detail.attributes["current_movie"] as? String
+                }
+                stats.libraryGB = (detail.attributes["library_gb"] as? NSNumber)?.doubleValue
+            }
+            if let detail = await ha.fetchStateDetail(entityId: "sensor.tunarr_watchdog_restarts_24h") {
+                stats.watchdogRestarts24h = Int(detail.state)
+            }
+        }
+        serverStats = stats
+    }
+
+    @ViewBuilder
+    private func statsSection() -> some View {
+        if state.isDemoMode {
+            Text("SERVER STATS UNAVAILABLE IN DEMO MODE")
+                .font(Theme.mono(16, weight: .medium))
+                .foregroundColor(Theme.dimText)
+        } else if state.client == nil {
+            Text("NO TUNARR SERVER CONFIGURED")
+                .font(Theme.mono(16, weight: .medium))
+                .foregroundColor(Theme.dimText)
+        } else if let stats = serverStats {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("SERVER STATS")
+                        .font(Theme.mono(18))
+                        .foregroundColor(.white)
+                    Spacer()
+                    Text(stats.tunarrReachable
+                         ? "TUNARR \(stats.version ?? "?") · UP"
+                         : "TUNARR UNREACHABLE")
+                        .font(Theme.mono(16, weight: .medium))
+                        .foregroundColor(stats.tunarrReachable ? Theme.onAir : Theme.accent)
+                }
+                if stats.tunarrReachable {
+                    Text("ACTIVE STREAMS: \(stats.sessions.count)")
+                        .font(Theme.mono(16, weight: .medium))
+                        .foregroundColor(Theme.dimText)
+                    ForEach(stats.sessions) { session in
+                        HStack(spacing: 12) {
+                            Text(channelLabel(for: session.channelId))
+                                .font(Theme.mono(16, weight: .medium))
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                            Spacer()
+                            Text(sessionDetailLabel(session))
+                                .font(Theme.mono(15, weight: .medium))
+                                .foregroundColor(Theme.dimText)
+                        }
+                    }
+                }
+                if let health = healthLine(stats) {
+                    Text(health)
+                        .font(Theme.mono(15, weight: .medium))
+                        .foregroundColor(Theme.dimText)
+                }
+            }
+        } else {
+            Text("LOADING SERVER STATS…")
+                .font(Theme.mono(16, weight: .medium))
+                .foregroundColor(Theme.dimText)
+        }
+    }
+
+    private func channelLabel(for channelId: String) -> String {
+        if let channel = state.allChannels.first(where: { $0.id == channelId }) {
+            return "CH \(channel.number) \(channel.name.uppercased())"
+        }
+        return String(channelId.prefix(8)).uppercased()
+    }
+
+    private func sessionDetailLabel(_ session: TunarrClient.SessionDetail) -> String {
+        var parts = ["\(session.numConnections) \(session.numConnections == 1 ? "VIEWER" : "VIEWERS")"]
+        if let age = session.newestHeartbeatAge {
+            parts.append("HB \(age)S")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// One line of slower-moving health from the HA sensors; nil when HA
+    /// isn't configured or the sensors don't exist on this install.
+    private func healthLine(_ stats: ServerStats) -> String? {
+        var parts: [String] = []
+        if let count = stats.ffmpegCount { parts.append("FFMPEG PROCS \(count)") }
+        if let restarts = stats.watchdogRestarts24h { parts.append("WATCHDOG 24H \(restarts)") }
+        if let factory = stats.factoryState {
+            var label = "COPY FACTORY \(factory.uppercased())"
+            if let movie = stats.currentMovie { label += " (\(movie.uppercased()))" }
+            parts.append(label)
+        }
+        if let gb = stats.libraryGB { parts.append("SDR LIB \(Int(gb))GB") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     private func closeQuickPanel() {
