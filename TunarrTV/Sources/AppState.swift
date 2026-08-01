@@ -586,6 +586,11 @@ final class AppState: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] in self?.objectWillChange.send() }
         #endif
+
+        systemNowPlaying.configureCommands(
+            toggle: { [weak self] in self?.togglePause() },
+            next: { [weak self] in self?.channelUp() },
+            previous: { [weak self] in self?.channelDown() })
     }
 
     #if os(iOS)
@@ -680,6 +685,31 @@ final class AppState: ObservableObject {
         }
     }
 
+    // MARK: - Now-playing → system (MPNowPlayingInfoCenter)
+
+    /// What MediaRemote — and therefore HA's Apple TV integration — reads.
+    let systemNowPlaying = NowPlayingReporter()
+
+    /// Stamps the tuned channel + current program into the system now-playing
+    /// center. Called on tune/pause/foreground and every 15s tick (which
+    /// handles program rollovers and keeps the progress bar honest).
+    func updateSystemNowPlaying() {
+        guard let channel = tunedChannel else {
+            systemNowPlaying.clear()
+            return
+        }
+        let mix = tunedMixInfo
+        systemNowPlaying.update(.init(
+            channelId: channel.id,
+            channelNumber: mix?.baseNumber ?? channel.number,
+            channelName: mix?.baseName ?? channel.name,
+            genre: channel.groupTitle,
+            iconURL: channel.icon?.path.flatMap { URL(string: $0) },
+            entry: nowPlaying(on: channel),
+            isPaused: isPaused,
+            now: Date()))
+    }
+
     // MARK: - Now-playing → Home Assistant
 
     /// Publishes what this device is showing to a per-device HA sensor
@@ -709,14 +739,35 @@ final class AppState: ObservableObject {
                 attributes["channel"] = channel.number
             }
             attributes["view"] = isFullscreen ? "watching" : "guide"
-            if let program = nowPlaying(on: channel)?.title {
-                attributes["program"] = program
+            if let entry = nowPlaying(on: channel) {
+                attributes["program"] = entry.title
+                if let subtitle = entry.subtitle { attributes["episode_title"] = subtitle }
+                if let label = entry.episodeLabel { attributes["episode"] = label }
+                if let year = entry.year { attributes["year"] = year }
+                if let summary = entry.summary, !summary.isEmpty {
+                    attributes["summary"] = String(summary.prefix(255))
+                }
+                let duration = entry.stop.timeIntervalSince(entry.start)
+                if duration > 0, !entry.isSynthetic {
+                    attributes["program_start"] = Self.haTimestamp.string(from: entry.start)
+                    attributes["program_end"] = Self.haTimestamp.string(from: entry.stop)
+                    let progress = Date().timeIntervalSince(entry.start) / duration
+                    attributes["progress_pct"] = Int((min(max(progress, 0), 1) * 100).rounded())
+                }
             }
+            if let group = channel.groupTitle, !group.isEmpty {
+                attributes["channel_group"] = group
+            }
+            attributes["paused"] = isPaused
         } else {
             stateValue = "Idle"; attributes["view"] = "idle"
         }
         Task { await ha.setState(entityId: entityId, state: stateValue, attributes: attributes) }
     }
+
+    /// ISO 8601 for the sensor's program_start/end attributes, so HA
+    /// templates can parse them with as_datetime directly.
+    private static let haTimestamp = ISO8601DateFormatter()
 
     /// Slugifies a device name into a valid HA entity-id suffix ([a-z0-9_]).
     static func entitySlug(_ name: String) -> String {
@@ -1107,6 +1158,7 @@ final class AppState: ObservableObject {
                 try? await Task.sleep(nanoseconds: 15_000_000_000)
                 guard let self else { return }
                 self.now = Date()
+                self.updateSystemNowPlaying()
                 // Slide the window forward as time passes, unless the user
                 // has paged ahead (their position is untouched).
                 if self.windowStart < self.earliestWindowStart {
@@ -1453,6 +1505,7 @@ final class AppState: ObservableObject {
             Task { await refreshWeather() }
         }
         if haReportNowPlaying { reportNowPlayingToHA() }
+        updateSystemNowPlaying()
         if Self.isSyntheticChannel(channel.id) {
             itemFailureWatch = nil
             pendingTune?.cancel()
@@ -1548,6 +1601,7 @@ final class AppState: ObservableObject {
     /// ffmpeg on Tunarr 1.3.8, so we deliberately don't.)
     func appDidEnterBackground() {
         if haReportNowPlaying { reportNowPlayingToHA(background: true) }
+        systemNowPlaying.clear()
         guard let channel = tunedChannel, !Self.isSyntheticChannel(channel.id), !isDemoMode else { return }
         _ = channel
         pendingTune?.cancel()
@@ -1557,6 +1611,7 @@ final class AppState: ObservableObject {
 
     func appDidBecomeActive() {
         if haReportNowPlaying { reportNowPlayingToHA() }
+        updateSystemNowPlaying()
         guard let channel = tunedChannel, !Self.isSyntheticChannel(channel.id), !isDemoMode,
               player.currentItem == nil else { return }
         tune(channel, isRetry: true)
@@ -1658,6 +1713,7 @@ final class AppState: ObservableObject {
             player.pause()
         }
         isPaused.toggle()
+        updateSystemNowPlaying()
     }
 
     // MARK: - Guide window paging
