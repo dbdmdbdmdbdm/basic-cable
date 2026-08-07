@@ -526,10 +526,12 @@ final class AppState: ObservableObject {
         windowStart = Self.floorToQuarterHour(Date())
 
         // Keep the Top Shelf extension's view of the settings current even
-        // for installs that predate the shared app group.
-        AppGroup.defaults?.set(serverURLString, forKey: "serverURL")
-        AppGroup.defaults?.set(favoriteChannelIds.sorted().joined(separator: ","),
-                               forKey: "favoriteChannels")
+        // for installs that predate the shared keychain config.
+        #if os(tvOS)
+        SharedConfig.set(serverURLString, forKey: "serverURL")
+        SharedConfig.set(favoriteChannelIds.sorted().joined(separator: ","),
+                         forKey: "favoriteChannels")
+        #endif
 
         NotificationCenter.default.addObserver(
             forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
@@ -639,14 +641,16 @@ final class AppState: ObservableObject {
 
     // MARK: - Settings persistence & iCloud sync
 
-    /// Settings the Top Shelf extension reads from the shared app group.
-    private static let appGroupSharedKeys: Set<String> = ["serverURL", "favoriteChannels"]
+    /// Settings the Top Shelf extension reads from the shared keychain.
+    private static let topShelfSharedKeys: Set<String> = ["serverURL", "favoriteChannels"]
 
     private func persist(_ value: String, forKey key: String) {
         UserDefaults.standard.set(value, forKey: key)
-        if Self.appGroupSharedKeys.contains(key) {
-            AppGroup.defaults?.set(value, forKey: key)
+        #if os(tvOS)
+        if Self.topShelfSharedKeys.contains(key) {
+            SharedConfig.set(value, forKey: key)
         }
+        #endif
         if iCloudSyncEnabled {
             NSUbiquitousKeyValueStore.default.set(value, forKey: key)
         }

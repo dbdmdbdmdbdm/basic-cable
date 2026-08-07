@@ -11,11 +11,10 @@ final class ContentProvider: TVTopShelfContentProvider {
     }
 
     private func content() async -> TVTopShelfContent? {
-        guard let defaults = AppGroup.defaults,
-              let urlString = defaults.string(forKey: "serverURL"), !urlString.isEmpty,
+        guard let urlString = SharedConfig.get("serverURL"), !urlString.isEmpty,
               let client = TunarrClient(baseURLString: urlString) else { return nil }
         let favoriteIds = Set(
-            (defaults.string(forKey: "favoriteChannels") ?? "")
+            (SharedConfig.get("favoriteChannels") ?? "")
                 .split(separator: ",")
                 .map { $0.trimmingCharacters(in: .whitespaces) }
                 .filter { !$0.isEmpty }

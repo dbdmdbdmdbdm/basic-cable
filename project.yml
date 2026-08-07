@@ -27,8 +27,8 @@ targets:
       path: TunarrTV/TunarrTV.entitlements
       properties:
         com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)$(CFBundleIdentifier)
-        com.apple.security.application-groups:
-          - group.com.dbdm.tunarrtv
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.dbdm.tunarrtv.shared
     info:
       path: TunarrTV/Info.plist
       properties:
@@ -37,6 +37,7 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         ITSAppUsesNonExemptEncryption: false
         UIUserInterfaceStyle: Dark
+        AppIdentifierPrefix: $(AppIdentifierPrefix)
         CFBundleURLTypes:
           - CFBundleURLName: com.dbdm.tunarrtv
             CFBundleURLSchemes:
@@ -84,14 +85,15 @@ targets:
     entitlements:
       path: TunarrTV/TunarrTVTopShelf.entitlements
       properties:
-        com.apple.security.application-groups:
-          - group.com.dbdm.tunarrtv
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.dbdm.tunarrtv.shared
     info:
       path: TunarrTV/Info-TopShelf.plist
       properties:
         CFBundleDisplayName: Basic Cable
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        AppIdentifierPrefix: $(AppIdentifierPrefix)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.tv-top-shelf
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ContentProvider

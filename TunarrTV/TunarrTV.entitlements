@@ -4,9 +4,9 @@
 <dict>
 	<key>com.apple.developer.ubiquity-kvstore-identifier</key>
 	<string>$(TeamIdentifierPrefix)$(CFBundleIdentifier)</string>
-	<key>com.apple.security.application-groups</key>
+	<key>keychain-access-groups</key>
 	<array>
-		<string>group.com.dbdm.tunarrtv</string>
+		<string>$(AppIdentifierPrefix)com.dbdm.tunarrtv.shared</string>
 	</array>
 </dict>
 </plist>
