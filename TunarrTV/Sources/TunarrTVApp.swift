@@ -15,6 +15,7 @@ struct TunarrTVApp: App {
             ContentView()
                 .environmentObject(state)
                 .preferredColorScheme(.dark)
+                .onOpenURL { url in state.handleDeepLink(url) }
         }
         .onChange(of: scenePhase) { _, phase in
             // Stop streaming (and reap our Tunarr session) when the app

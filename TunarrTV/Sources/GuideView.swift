@@ -144,7 +144,8 @@ struct GuideView: View {
             ChannelLabelView(
                 channel: channel,
                 isTuned: state.tunedChannel?.id == channel.id,
-                scale: scale
+                scale: scale,
+                isFavorite: state.favoriteChannelIds.contains(channel.id)
             )
         }
         .buttonStyle(RetroCellButtonStyle())
@@ -322,15 +323,23 @@ struct ChannelLabelView: View {
     let channel: Channel
     let isTuned: Bool
     let scale: CGFloat
+    var isFavorite = false
 
     var body: some View {
         HStack(spacing: 8 * scale) {
             ChannelLogoView(channel: channel, size: 34 * scale)
                 .padding(.leading, 6 * scale)
             VStack(alignment: .leading, spacing: 0) {
-                Text("\(channel.number)")
-                    .font(Theme.mono(14 * scale, weight: .medium))
-                    .foregroundColor(Color(white: 0.8))
+                HStack(spacing: 3 * scale) {
+                    Text("\(channel.number)")
+                        .font(Theme.mono(14 * scale, weight: .medium))
+                        .foregroundColor(Color(white: 0.8))
+                    if isFavorite {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 10 * scale))
+                            .foregroundColor(.yellow)
+                    }
+                }
                 Text(channel.name.uppercased())
                     .font(Theme.mono(19 * scale))
                     .foregroundColor(.white)

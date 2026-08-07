@@ -250,6 +250,58 @@ struct HAClient {
         return (state, object["attributes"] as? [String: Any] ?? [:])
     }
 
+    /// A helper in HA named `*.basic_cable_tool_*` — surfaced as a control
+    /// in the player's quick panel (SERVER TOOLS). Zero app config: create
+    /// an input_boolean / input_button / script with that id prefix in HA
+    /// and it appears; toggles show live state, buttons fire once.
+    struct ServerTool: Identifiable {
+        let entityId: String
+        let name: String
+        let state: String
+        var id: String { entityId }
+        var isToggle: Bool { entityId.hasPrefix("input_boolean.") }
+        var isOn: Bool { state == "on" }
+
+        /// domain/service the panel control invokes.
+        var action: (domain: String, service: String)? {
+            switch entityId.split(separator: ".").first.map(String.init) {
+            case "input_boolean": return ("input_boolean", "toggle")
+            case "input_button": return ("input_button", "press")
+            case "button": return ("button", "press")
+            case "script": return ("script", "turn_on")
+            default: return nil
+            }
+        }
+    }
+
+    func fetchServerTools() async -> [ServerTool] {
+        guard let (data, response) = try? await URLSession.shared.data(for: request(path: "api/states")),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let list = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+        return list.compactMap { object in
+            guard let entityId = object["entity_id"] as? String,
+                  entityId.contains(".basic_cable_tool_"),
+                  let state = object["state"] as? String else { return nil }
+            let attributes = object["attributes"] as? [String: Any] ?? [:]
+            var name = (attributes["friendly_name"] as? String) ?? entityId
+            for prefix in ["Basic Cable Tool ", "Basic Cable "] where name.hasPrefix(prefix) {
+                name = String(name.dropFirst(prefix.count))
+            }
+            return ServerTool(entityId: entityId, name: name, state: state)
+        }
+        .sorted { $0.entityId < $1.entityId }
+    }
+
+    /// Fire-and-forget service call (quick-panel server tools).
+    func callService(domain: String, service: String, entityId: String) async {
+        var request = request(path: "api/services/\(domain)/\(service)")
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 8
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["entity_id": entityId])
+        _ = try? await URLSession.shared.data(for: request)
+    }
+
     struct EntitySummary {
         let entityId: String
         let name: String?

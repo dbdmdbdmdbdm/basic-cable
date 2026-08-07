@@ -20,10 +20,15 @@ targets:
       - TunarrTV/Sources
       - TunarrTV/Assets.xcassets
       - TunarrTV/Resources
+    dependencies:
+      - target: TunarrTVTopShelf
+        embed: true
     entitlements:
       path: TunarrTV/TunarrTV.entitlements
       properties:
         com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)$(CFBundleIdentifier)
+        com.apple.security.application-groups:
+          - group.com.dbdm.tunarrtv
     info:
       path: TunarrTV/Info.plist
       properties:
@@ -32,6 +37,10 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         ITSAppUsesNonExemptEncryption: false
         UIUserInterfaceStyle: Dark
+        CFBundleURLTypes:
+          - CFBundleURLName: com.dbdm.tunarrtv
+            CFBundleURLSchemes:
+              - basiccable
         UIAppFonts:
           - VT323-Regular.ttf
           - SpaceMono-Bold.ttf
@@ -64,6 +73,33 @@ targets:
           PLIST="$TARGET_BUILD_DIR/$INFOPLIST_PATH"
           /usr/libexec/PlistBuddy -c "Add :GitCommit string $COMMIT" "$PLIST" 2>/dev/null || \
             /usr/libexec/PlistBuddy -c "Set :GitCommit $COMMIT" "$PLIST"
+  TunarrTVTopShelf:
+    type: tv-app-extension
+    platform: tvOS
+    sources:
+      - TunarrTV/TopShelf
+      - TunarrTV/Sources/TunarrClient.swift
+      - TunarrTV/Sources/Models.swift
+      - TunarrTV/Sources/AppGroup.swift
+    entitlements:
+      path: TunarrTV/TunarrTVTopShelf.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.dbdm.tunarrtv
+    info:
+      path: TunarrTV/Info-TopShelf.plist
+      properties:
+        CFBundleDisplayName: Basic Cable
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.tv-top-shelf
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ContentProvider
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dbdm.tunarrtv.topshelf
   TunarrTViOS:
     type: application
     platform: iOS

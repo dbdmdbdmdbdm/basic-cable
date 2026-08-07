@@ -49,6 +49,16 @@ final class AppState: ObservableObject {
     @Published var hiddenCameraIds: Set<String> {
         didSet { persist(hiddenCameraIds.sorted().joined(separator: ","), forKey: "hiddenCameras") }
     }
+    /// Favorite channels (starred in the guide, toggled from the player).
+    /// Keyed by the guide row's channel id — a mix family stars its primary.
+    @Published var favoriteChannelIds: Set<String> {
+        didSet { persist(favoriteChannelIds.sorted().joined(separator: ","), forKey: "favoriteChannels") }
+    }
+    /// When favorites exist, channel up/down surfs favorites only; the
+    /// guide still lists (and tunes) the full lineup.
+    @Published var favoritesSurfEnabled: Bool {
+        didSet { persist(favoritesSurfEnabled ? "true" : "false", forKey: "favoritesSurf") }
+    }
     @Published var dashImageURLString: String {
         didSet { persist(dashImageURLString, forKey: "dashImageURL") }
     }
@@ -493,6 +503,13 @@ final class AppState: ObservableObject {
                 .map { $0.trimmingCharacters(in: .whitespaces) }
                 .filter { !$0.isEmpty }
         )
+        favoriteChannelIds = Set(
+            setting("favoriteChannels")
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+        )
+        favoritesSurfEnabled = setting("favoritesSurf") != "false"
         dashImageURLString = setting("dashImageURL")
         immichURLString = setting("immichURL")
         immichAPIKey = setting("immichKey")
@@ -507,6 +524,12 @@ final class AppState: ObservableObject {
         weatherOverlayOnCameras = setting("weatherOverlayCameras") == "true"
         haReportNowPlaying = setting("haReportNowPlaying") == "true"
         windowStart = Self.floorToQuarterHour(Date())
+
+        // Keep the Top Shelf extension's view of the settings current even
+        // for installs that predate the shared app group.
+        AppGroup.defaults?.set(serverURLString, forKey: "serverURL")
+        AppGroup.defaults?.set(favoriteChannelIds.sorted().joined(separator: ","),
+                               forKey: "favoriteChannels")
 
         NotificationCenter.default.addObserver(
             forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
@@ -616,8 +639,14 @@ final class AppState: ObservableObject {
 
     // MARK: - Settings persistence & iCloud sync
 
+    /// Settings the Top Shelf extension reads from the shared app group.
+    private static let appGroupSharedKeys: Set<String> = ["serverURL", "favoriteChannels"]
+
     private func persist(_ value: String, forKey key: String) {
         UserDefaults.standard.set(value, forKey: key)
+        if Self.appGroupSharedKeys.contains(key) {
+            AppGroup.defaults?.set(value, forKey: key)
+        }
         if iCloudSyncEnabled {
             NSUbiquitousKeyValueStore.default.set(value, forKey: key)
         }
@@ -642,6 +671,8 @@ final class AppState: ObservableObject {
         persist(weatherOverlayOnPhotos ? "true" : "false", forKey: "weatherOverlayPhotos")
         persist(weatherOverlayOnCameras ? "true" : "false", forKey: "weatherOverlayCameras")
         persist(haReportNowPlaying ? "true" : "false", forKey: "haReportNowPlaying")
+        persist(favoriteChannelIds.sorted().joined(separator: ","), forKey: "favoriteChannels")
+        persist(favoritesSurfEnabled ? "true" : "false", forKey: "favoritesSurf")
     }
 
     // MARK: - Settings backup / restore / reset
@@ -655,7 +686,7 @@ final class AppState: ObservableObject {
         "hiddenCameras", "dashImageURL", "immichURL", "immichKey",
         "immichAlbumId", "immichAlbumName", "mediaPlayerEntities",
         "tickerEnabled", "weatherOverlayPhotos", "weatherOverlayCameras",
-        "haReportNowPlaying",
+        "haReportNowPlaying", "favoriteChannels", "favoritesSurf",
     ]
 
     private func applySetting(_ key: String, _ value: String) {
@@ -681,6 +712,11 @@ final class AppState: ObservableObject {
         case "weatherOverlayPhotos": weatherOverlayOnPhotos = value == "true"
         case "weatherOverlayCameras": weatherOverlayOnCameras = value == "true"
         case "haReportNowPlaying": haReportNowPlaying = value == "true"
+        case "favoriteChannels":
+            favoriteChannelIds = Set(value.split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty })
+        case "favoritesSurf": favoritesSurfEnabled = value != "false"
         default: break
         }
     }
@@ -1148,6 +1184,30 @@ final class AppState: ObservableObject {
             // still finds it after a rename/icon change across reloads.
             tunedChannel = fresh
         }
+        // A Top Shelf deep link that arrived before the lineup loaded.
+        if let number = pendingDeepLinkChannelNumber {
+            pendingDeepLinkChannelNumber = nil
+            if let target = allChannels.first(where: { $0.number == number }) {
+                tune(target)
+                isFullscreen = true
+            }
+        }
+    }
+
+    // MARK: - Deep links (basiccable://channel/<number>, from Top Shelf)
+
+    private var pendingDeepLinkChannelNumber: Int?
+
+    func handleDeepLink(_ url: URL) {
+        guard url.scheme == "basiccable", url.host == "channel",
+              let number = Int(url.lastPathComponent) else { return }
+        if let target = allChannels.first(where: { $0.number == number }) {
+            tune(target)
+            isFullscreen = true
+        } else {
+            // Cold launch: the lineup isn't in yet — tune once reload lands.
+            pendingDeepLinkChannelNumber = number
+        }
     }
 
     private func startTimers() {
@@ -1453,6 +1513,53 @@ final class AppState: ObservableObject {
         return (index, family.count, primary.name, primary.number)
     }
 
+    /// The guide row a channel appears under: its family's primary for mix
+    /// variants, itself otherwise. Favorites and the flip button both work
+    /// in guide-row terms so hidden variants behave as their family.
+    func guideRowId(of channel: Channel) -> String {
+        variantFamily(of: channel)?.first?.id ?? channel.id
+    }
+
+    // MARK: - Last-channel flip
+
+    /// The channel tuned before the last real channel change (variant hops
+    /// don't count). Session-only, like a cable box's flip buffer.
+    @Published private(set) var flipBackChannelId: String?
+
+    var flipBackChannel: Channel? {
+        guard let id = flipBackChannelId,
+              let target = allChannels.first(where: { $0.id == id }),
+              let tuned = tunedChannel,
+              guideRowId(of: target) != guideRowId(of: tuned) else { return nil }
+        return target
+    }
+
+    func flipToLastChannel() {
+        guard let target = flipBackChannel else { return }
+        // A flip is deliberate — no zap debounce, the stream starts instantly.
+        tune(target)
+    }
+
+    // MARK: - Favorites
+
+    func isFavorite(_ channel: Channel) -> Bool {
+        favoriteChannelIds.contains(guideRowId(of: channel))
+    }
+
+    func toggleFavorite(_ channel: Channel) {
+        let key = guideRowId(of: channel)
+        if favoriteChannelIds.contains(key) {
+            favoriteChannelIds.remove(key)
+        } else {
+            favoriteChannelIds.insert(key)
+        }
+    }
+
+    /// Guide-order favorites (ids may linger for channels that vanished).
+    var favoriteChannels: [Channel] {
+        channels.filter { favoriteChannelIds.contains($0.id) }
+    }
+
     /// Hop to the previous/next member of the tuned channel's family.
     func cycleVariant(_ delta: Int) {
         guard let channel = tunedChannel, let family = variantFamily(of: channel),
@@ -1486,6 +1593,12 @@ final class AppState: ObservableObject {
         let previous = tunedChannel
         tunedChannel = channel
         isPaused = false
+        // Cable-remote FLIP: remember where we came from — but only across
+        // real channel changes. Variant hops inside a mix family stay one
+        // "channel", and re-tunes/retries don't clobber the flip target.
+        if let previous, guideRowId(of: previous) != guideRowId(of: channel) {
+            flipBackChannelId = previous.id
+        }
         // Leaving (or re-tuning) the cameras channel drops back to the grid.
         if channel.id != previous?.id {
             cameraSpotlight = nil
@@ -1684,17 +1797,31 @@ final class AppState: ObservableObject {
 
     private func step(by delta: Int) {
         guard !channels.isEmpty else { return }
+        // Favorites surf: with favorites set (and the toggle on), up/down
+        // rides the favorites ring; everything else stays reachable from
+        // the guide. A tuned non-favorite hops to the nearest favorite.
+        let favorites = favoriteChannels
+        let ring = (favoritesSurfEnabled && !favorites.isEmpty) ? favorites : channels
         // A tuned hidden variant zaps as its family's guide entry.
-        let anchorId = tunedChannel.flatMap { tuned in
-            variantFamily(of: tuned)?.first?.id ?? tuned.id
-        }
-        guard let anchorId,
-              let index = channels.firstIndex(where: { $0.id == anchorId }) else {
-            tune(channels[0])
+        let anchorId = tunedChannel.map { guideRowId(of: $0) }
+        guard let anchorId else {
+            tune(ring[0])
             return
         }
-        let next = (index + delta + channels.count) % channels.count
-        tune(channels[next])
+        if let index = ring.firstIndex(where: { $0.id == anchorId }) {
+            tune(ring[(index + delta + ring.count) % ring.count])
+            return
+        }
+        // Tuned from the guide to a channel outside the ring: continue the
+        // surf from its position (ring and guide share channel-number order).
+        guard let number = allChannels.first(where: { $0.id == anchorId })?.number else {
+            tune(ring[0])
+            return
+        }
+        let next = delta > 0
+            ? ring.first { $0.number > number } ?? ring[0]
+            : ring.last { $0.number < number } ?? ring[ring.count - 1]
+        tune(next)
         // NOTE: no speculative prefetch of the channel after `next` — with
         // several devices surfing at once it stacked enough concurrent
         // transcodes to starve the server (2026-07-10). Guide-focus

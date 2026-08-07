@@ -14,6 +14,10 @@
 - Classic channel-guide grid: per-show cell shading (adjacent programs alternate three muted tones; episodes of a show match), per-channel accent stripes, channel logos, red now-line, green "on air" highlight with elapsed-time fill, monospaced retro styling
 - Live video preview + program details (episode info, year, synopsis, progress bar with minutes remaining) that follow your focus through the guide
 - Full-screen viewing with channel up/down zapping and a retro channel banner
+- **Last-channel flip**: jump back to the channel you were just watching, cable-remote style (quick panel on tvOS, ↩ button on iPhone/iPad)
+- **Favorites**: star channels from the player (★ in the guide); with favorites set, channel up/down surfs favorites only while the guide keeps the full lineup
+- **Top Shelf** (Apple TV): with the app in the home screen's top row, see what's ON NOW across your channels — favorites first — and jump straight to a channel
+- **Server tools in the quick panel**: create Home Assistant helpers named `*.basic_cable_tool_*` (input_boolean / input_button / script) and they appear as toggles/buttons in the hold-select panel — no app config
 - Guide paging in 30-minute steps, ~12 hours of schedule ahead
 - Built-in **weather channel** (channel 999) with a retro "Local on the 8s" style display
 - Optional **Home Assistant dashboard channels** (996 and down) via the bundled [ha-screencap](ha-screencap) Home Assistant add-on / Docker container

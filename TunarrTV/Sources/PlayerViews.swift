@@ -37,6 +37,8 @@ struct FullscreenPlayerView: View {
     @State private var bannerTask: Task<Void, Never>?
     @State private var showQuickPanel = false
     @State private var serverStats: ServerStats?
+    @State private var serverTools: [HAClient.ServerTool] = []
+    @State private var firedTool: String?
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -195,6 +197,25 @@ struct FullscreenPlayerView: View {
                 Text("CH \(channel.number) · \(channel.name.uppercased())")
                     .font(Theme.mono(22))
                     .foregroundColor(Theme.dimText)
+                if let flip = state.flipBackChannel {
+                    Button {
+                        closeQuickPanel()
+                        state.flipToLastChannel()
+                    } label: {
+                        Text("FLIP BACK TO CH \(flip.number) · \(flip.name.uppercased())")
+                            .font(Theme.mono(24, weight: .medium))
+                    }
+                }
+                Toggle(isOn: favoriteBinding(for: channel)) {
+                    Text("★ FAVORITE THIS CHANNEL")
+                        .font(Theme.mono(24, weight: .medium))
+                }
+                if !state.favoriteChannelIds.isEmpty {
+                    Toggle(isOn: $state.favoritesSurfEnabled) {
+                        Text("CH ▲▼ SURFS FAVORITES ONLY (\(state.favoriteChannels.count)★)")
+                            .font(Theme.mono(24, weight: .medium))
+                    }
+                }
                 Toggle(isOn: tickerBinding()) {
                     Text("BOTTOM TICKER (ALL CHANNELS)")
                         .font(Theme.mono(24, weight: .medium))
@@ -202,6 +223,7 @@ struct FullscreenPlayerView: View {
                 .focused($panelFocused)
                 Divider().background(Color(white: 0.25))
                 statsSection()
+                serverToolsSection()
                 Text("HOLD SELECT ANYTIME FOR THIS PANEL · SET PLAYERS IN SETTINGS · MENU TO CLOSE")
                     .font(Theme.mono(15, weight: .medium))
                     .foregroundColor(Theme.dimText)
@@ -268,8 +290,65 @@ struct FullscreenPlayerView: View {
             if let detail = await ha.fetchStateDetail(entityId: "sensor.tunarr_watchdog_restarts_24h") {
                 stats.watchdogRestarts24h = Int(detail.state)
             }
+            serverTools = await ha.fetchServerTools()
         }
         serverStats = stats
+    }
+
+    // MARK: - Server tools (HA helpers named *.basic_cable_tool_*)
+
+    @ViewBuilder
+    private func serverToolsSection() -> some View {
+        if !serverTools.isEmpty {
+            Divider().background(Color(white: 0.25))
+            Text("SERVER TOOLS")
+                .font(Theme.mono(18))
+                .foregroundColor(.white)
+            ForEach(serverTools) { tool in
+                if tool.isToggle {
+                    Toggle(isOn: toolBinding(tool)) {
+                        Text(tool.name.uppercased())
+                            .font(Theme.mono(24, weight: .medium))
+                    }
+                } else {
+                    Button {
+                        fire(tool)
+                    } label: {
+                        Text(firedTool == tool.entityId
+                             ? "\(tool.name.uppercased()) · SENT"
+                             : tool.name.uppercased())
+                            .font(Theme.mono(24, weight: .medium))
+                    }
+                }
+            }
+        }
+    }
+
+    private func toolBinding(_ tool: HAClient.ServerTool) -> Binding<Bool> {
+        Binding(
+            get: { (serverTools.first { $0.entityId == tool.entityId } ?? tool).isOn },
+            set: { on in
+                // Optimistic flip; the 5s stats refresh corrects any drift.
+                if let index = serverTools.firstIndex(where: { $0.entityId == tool.entityId }) {
+                    serverTools[index] = HAClient.ServerTool(
+                        entityId: tool.entityId, name: tool.name, state: on ? "on" : "off")
+                }
+                fire(tool, announce: false)
+            }
+        )
+    }
+
+    private func fire(_ tool: HAClient.ServerTool, announce: Bool = true) {
+        guard let ha = state.haClient, let action = tool.action else { return }
+        if announce { firedTool = tool.entityId }
+        Task {
+            await ha.callService(domain: action.domain, service: action.service,
+                                 entityId: tool.entityId)
+            if announce {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                if firedTool == tool.entityId { firedTool = nil }
+            }
+        }
     }
 
     @ViewBuilder
@@ -367,6 +446,13 @@ struct FullscreenPlayerView: View {
                 state.tickerEnabled = on
                 if on { Task { await state.refreshWeather() } }
             }
+        )
+    }
+
+    private func favoriteBinding(for channel: Channel) -> Binding<Bool> {
+        Binding(
+            get: { state.isFavorite(channel) },
+            set: { _ in state.toggleFavorite(channel) }
         )
     }
 

@@ -247,6 +247,21 @@ struct FullscreenPlayerIOS: View {
                         .background(Color.black.opacity(0.6))
                         .clipShape(Circle())
                 }
+                if let channel = state.tunedChannel {
+                    Button {
+                        state.toggleFavorite(channel)
+                        scheduleHide()
+                    } label: {
+                        Image(systemName: state.isFavorite(channel) ? "star.fill" : "star")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(state.isFavorite(channel) ? .yellow : .white)
+                            .frame(width: 48, height: 48)
+                            .background(Color.black.opacity(0.6))
+                            .clipShape(Circle())
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
                 Button {
                     state.tickerEnabled.toggle()
                     if state.tickerEnabled {
@@ -290,6 +305,13 @@ struct FullscreenPlayerIOS: View {
                     if state.tunedMixInfo != nil {
                         zapButton("shuffle", tint: Theme.onAir) {
                             state.cycleVariant(1)
+                            scheduleHide()
+                        }
+                    }
+                    // Cable-remote FLIP back to the previous channel.
+                    if state.flipBackChannel != nil {
+                        zapButton("arrow.uturn.backward") {
+                            state.flipToLastChannel()
                             scheduleHide()
                         }
                     }
