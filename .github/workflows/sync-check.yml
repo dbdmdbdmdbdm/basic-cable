@@ -4,6 +4,9 @@ name: sync-check
 # byte-identical. Fail the build if they ever diverge.
 on: [push, pull_request]
 
+permissions:
+  contents: read
+
 jobs:
   server-js-in-sync:
     runs-on: ubuntu-latest

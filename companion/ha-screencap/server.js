@@ -274,6 +274,37 @@ async function waitForReady(page, maxMs = 30000) {
   }
 }
 
+// Hiding the chrome collapses the sidebar via CSS, but HA's JS-driven
+// layouts (masonry columns, iframe/aspect-ratio cards) only recompute on a
+// window resize event — nothing fires one, so whether the shot keeps a
+// sidebar-wide dead band depends on a layout race. Dispatch the resize
+// ourselves and hold the screenshot until the view actually spans the
+// viewport (or the deadline passes — non-lovelace panels just fall through).
+async function waitForFullWidth(page, maxMs = 4000) {
+  const deadline = Date.now() + maxMs;
+  for (;;) {
+    let ok = true;
+    try {
+      ok = await page.evaluate(() => {
+        window.dispatchEvent(new Event('resize'));
+        const root = document
+          .querySelector('home-assistant')
+          .shadowRoot.querySelector('home-assistant-main')
+          .shadowRoot.querySelector('partial-panel-resolver')
+          .querySelector('ha-panel-lovelace')
+          .shadowRoot.querySelector('hui-root');
+        const view = root.shadowRoot.querySelector('hui-view-container')
+          || root.shadowRoot.querySelector('#view');
+        return view.getBoundingClientRect().width >= window.innerWidth - 8;
+      });
+    } catch (_) {
+      /* structure change or non-lovelace panel — don't block the capture */
+    }
+    if (ok || Date.now() >= deadline) return;
+    await sleep(100);
+  }
+}
+
 // Cross-origin iframes (e.g. an iframe card embedding another LAN app)
 // paint after the dashboard itself reports ready, and their internals are
 // unreadable from out here — so when the page contains one, give it a
@@ -331,6 +362,7 @@ async function captureWith(browser) {
       // settle: embedded pages paint after ready AND need to re-layout at
       // the post-sidebar width, or the shot keeps a sidebar-wide dead band.
       await hideChrome(page);
+      await waitForFullWidth(page);
       await settleIframes(page);
       latests[current] = await page.screenshot({ type: 'png' });
       latestAts[current] = Date.now();
@@ -582,9 +614,12 @@ init();
 // rejecting any Host header that is a real DNS name: legitimate access is
 // either through HA ingress (authenticated — carries X-Ingress-Path) or
 // direct to a literal IP / localhost / *.local address.
-function hostAllowed(req) {
-  // Ingress requests are already authenticated by HA — always allow.
-  if (req.headers['x-ingress-path']) return true;
+function hostAllowed(req, isIngress) {
+  // Ingress requests are already authenticated by HA — always allow. Trust the
+  // X-Ingress-Path header ONLY on the ingress listener; on the published LAN
+  // listener a client (e.g. a rebinding page) can forge it, so there it must
+  // not skip the Host allowlist below.
+  if (isIngress && req.headers['x-ingress-path']) return true;
   const host = req.headers.host;
   if (!host) return true; // no Host header — nothing to rebind
   // Strip the :port. Bracketed IPv6 (`[::1]:8090`) keeps its colons inside
@@ -618,8 +653,9 @@ function handleRequest(req, res, allowAdmin) {
       res.writeHead(403, { 'Content-Type': 'text/plain' });
       res.end('admin UI is only available through the Home Assistant sidebar');
     };
-    // Reject DNS-rebinding attempts before doing anything else.
-    if (!hostAllowed(req)) {
+    // Reject DNS-rebinding attempts before doing anything else. allowAdmin is
+    // true only on the ingress listener, so it doubles as "this is ingress".
+    if (!hostAllowed(req, allowAdmin)) {
       res.writeHead(403, { 'Content-Type': 'text/plain' });
       res.end('forbidden host');
       return;

@@ -32,17 +32,22 @@ jobs:
 
       - name: Set build number (manual runs only)
         if: github.event_name == 'workflow_dispatch'
+        env:
+          BUILD_NUMBER: ${{ inputs.build_number }}
         run: |
-          /usr/bin/sed -i '' "s/CURRENT_PROJECT_VERSION: \".*\"/CURRENT_PROJECT_VERSION: \"${{ inputs.build_number }}\"/" project.yml
+          /usr/bin/sed -i '' "s/CURRENT_PROJECT_VERSION: \".*\"/CURRENT_PROJECT_VERSION: \"$BUILD_NUMBER\"/" project.yml
 
       - name: Generate project
         run: xcodegen generate
 
       - name: Write ASC API key
+        env:
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
         run: |
           mkdir -p ~/.appstoreconnect/private_keys
-          echo "${{ secrets.ASC_KEY_P8_BASE64 }}" | base64 --decode \
-            > ~/.appstoreconnect/private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
+          echo "$ASC_KEY_P8_BASE64" | base64 --decode \
+            > ~/.appstoreconnect/private_keys/AuthKey_$ASC_KEY_ID.p8
 
       # Import a stable signing cert instead of letting -allowProvisioningUpdates
       # mint a new Apple Development cert on every ephemeral runner (those pile up

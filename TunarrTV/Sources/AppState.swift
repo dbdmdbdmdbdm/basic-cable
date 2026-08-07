@@ -869,21 +869,30 @@ final class AppState: ObservableObject {
         return key
     }
 
-    private func encryptSecret(_ plaintext: String) -> String? {
+    /// AES-GCM-seals a secret, binding it to `aad` (the server URL the secret
+    /// is for) as authenticated data. The sealed blob then only opens when
+    /// decrypted with the same URL — so a backup that re-pairs this token with a
+    /// different host (see restoreSettingsFromAddon) fails to open and is
+    /// discarded rather than sent to the attacker's server.
+    private func encryptSecret(_ plaintext: String, aad: String) -> String? {
         guard let data = plaintext.data(using: .utf8),
-              let sealed = try? AES.GCM.seal(data, using: backupCryptoKey()),
+              let sealed = try? AES.GCM.seal(data, using: backupCryptoKey(),
+                                             authenticating: Data(aad.utf8)),
               let combined = sealed.combined else { return nil }
         return Self.backupEncPrefix + combined.base64EncodedString()
     }
 
     /// Returns the plaintext, passing through values that aren't encrypted
-    /// (older plaintext backups), or nil when a ciphertext can't be opened.
-    private func decryptSecret(_ value: String) -> String? {
+    /// (older plaintext backups), or nil when a ciphertext can't be opened —
+    /// including when `aad` (the server URL being restored) doesn't match the
+    /// URL the secret was sealed for.
+    private func decryptSecret(_ value: String, aad: String) -> String? {
         guard value.hasPrefix(Self.backupEncPrefix) else { return value }
         let b64 = String(value.dropFirst(Self.backupEncPrefix.count))
         guard let combined = Data(base64Encoded: b64),
               let box = try? AES.GCM.SealedBox(combined: combined),
-              let data = try? AES.GCM.open(box, using: backupCryptoKey()),
+              let data = try? AES.GCM.open(box, using: backupCryptoKey(),
+                                           authenticating: Data(aad.utf8)),
               let plaintext = String(data: data, encoding: .utf8) else { return nil }
         return plaintext
     }
@@ -929,8 +938,13 @@ final class AppState: ObservableObject {
         // Encrypt the credential fields so the backup blob (which reaches HA's
         // off-box backups and is served unauthenticated on the LAN) never
         // carries the HA token or Immich key in cleartext.
+        // Each credential is sealed bound to its own server URL (AAD) so it can
+        // only be restored against that same URL.
+        let urlKeyForSecret = ["haToken": "haURL", "immichKey": "immichURL"]
         for key in Self.secretSettingKeys {
-            if let value = settings[key], !value.isEmpty, let sealed = encryptSecret(value) {
+            let aad = settings[urlKeyForSecret[key] ?? ""] ?? ""
+            if let value = settings[key], !value.isEmpty,
+               let sealed = encryptSecret(value, aad: aad) {
                 settings[key] = sealed
             }
         }
@@ -982,20 +996,25 @@ final class AppState: ObservableObject {
         for key in Self.settingsKeys where !Self.secretSettingKeys.contains(key) {
             applySetting(key, settings[key] ?? "")
         }
-        // Then resolve credentials.
+        // Then resolve credentials. Each token is AES-GCM-bound (AAD) to the
+        // server URL it was sealed for, so decryptSecret succeeds only when the
+        // backup's URL for this credential matches. A hostile backup that pairs
+        // a real (encrypted) token with a different host therefore fails to open
+        // here and is cleared — the token is never sent to that host.
         for pair in credentialPairs {
             let raw = settings[pair.secret] ?? ""
+            let newURL = settings[pair.url] ?? ""
             if raw.isEmpty {
                 applySetting(pair.secret, "")
-            } else if let plaintext = decryptSecret(raw) {
-                // Decryptable (or a legacy plaintext backup) — apply it.
+            } else if let plaintext = decryptSecret(raw, aad: newURL) {
+                // Opens only when the token was sealed for this exact URL.
                 applySetting(pair.secret, plaintext)
             } else {
-                // Can't be opened on this device (no key synced here). Keep the
-                // existing on-device token only if the server URL is unchanged;
-                // if the backup moves us to a different server, clear it so the
-                // old token is never sent to a new host — force re-entry.
-                let newURL = settings[pair.url] ?? ""
+                // Can't be opened for this URL (wrong/hostile URL, a legacy
+                // backup, or no key synced here). Keep the existing on-device
+                // token only if the URL is unchanged; if the backup moves us to
+                // a different server, clear it so no token is ever sent to a new
+                // host — force manual re-entry.
                 if newURL != pair.oldURL { applySetting(pair.secret, "") }
             }
         }

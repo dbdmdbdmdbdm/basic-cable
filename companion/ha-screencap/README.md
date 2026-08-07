@@ -22,7 +22,7 @@ Check it's working: `http://<host>:8090/latest.png` should show your
 dashboard, and `http://<host>:8090/healthz` reports snapshot age.
 
 Then in Basic Cable's settings, set **SNAPSHOT URL** to
-`http://<host>:8090/latest.png` — channel 998 appears in the guide.
+`http://<host>:8090/latest.png` — channel 996 appears in the guide.
 
 ## Environment
 

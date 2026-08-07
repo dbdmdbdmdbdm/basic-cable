@@ -614,9 +614,12 @@ init();
 // rejecting any Host header that is a real DNS name: legitimate access is
 // either through HA ingress (authenticated — carries X-Ingress-Path) or
 // direct to a literal IP / localhost / *.local address.
-function hostAllowed(req) {
-  // Ingress requests are already authenticated by HA — always allow.
-  if (req.headers['x-ingress-path']) return true;
+function hostAllowed(req, isIngress) {
+  // Ingress requests are already authenticated by HA — always allow. Trust the
+  // X-Ingress-Path header ONLY on the ingress listener; on the published LAN
+  // listener a client (e.g. a rebinding page) can forge it, so there it must
+  // not skip the Host allowlist below.
+  if (isIngress && req.headers['x-ingress-path']) return true;
   const host = req.headers.host;
   if (!host) return true; // no Host header — nothing to rebind
   // Strip the :port. Bracketed IPv6 (`[::1]:8090`) keeps its colons inside
@@ -650,8 +653,9 @@ function handleRequest(req, res, allowAdmin) {
       res.writeHead(403, { 'Content-Type': 'text/plain' });
       res.end('admin UI is only available through the Home Assistant sidebar');
     };
-    // Reject DNS-rebinding attempts before doing anything else.
-    if (!hostAllowed(req)) {
+    // Reject DNS-rebinding attempts before doing anything else. allowAdmin is
+    // true only on the ingress listener, so it doubles as "this is ingress".
+    if (!hostAllowed(req, allowAdmin)) {
       res.writeHead(403, { 'Content-Type': 'text/plain' });
       res.end('forbidden host');
       return;
